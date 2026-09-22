@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 using namespace ksp;
 using json=nlohmann::json;
 namespace {
@@ -47,7 +48,18 @@ void process_cases(const std::string& fake){WorkerClient c;auto x=options(fake,"
   x=options(fake,p.first);check(c.start(x),"fake launched");auto got=finish(c);if(!error(got,p.second))throw std::runtime_error(std::string("fake failure classified: ")+p.first+" expected "+p.second+" got "+json(got).dump());}
  x=options(fake,"hang_cancel");check(c.start(x),"hang fake launched");check(!c.start(x),"second start rejected");
  c.cancel();check(error(finish(c),"cancel_timeout"),"cancel escalation and reap");
- x=options(fake,"cancel_ack");check(c.start(x),"cancel acknowledging fake launched");c.cancel();auto cancelled=finish(c);
+ x=options(fake,"cancel_ack");check(c.start(x),"cancel acknowledging fake launched");
+ std::vector<json> cancelled;bool saw_started=false;
+ const auto ready_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+ while(!saw_started&&std::chrono::steady_clock::now()<ready_deadline){
+  auto batch=c.drain();for(auto& event:batch){
+   if(event.value("type",std::string{})=="started")saw_started=true;
+   cancelled.push_back(std::move(event));
+  }
+  if(!saw_started)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+ }
+ check(saw_started,"fake worker accepted request before cancellation");c.cancel();
+ auto terminal=finish(c);cancelled.insert(cancelled.end(),terminal.begin(),terminal.end());
  check(!cancelled.empty()&&cancelled.back().value("type",std::string{})=="cancelled","versioned cancellation acknowledged");
  x=options(fake,"valid");check(c.start(x),"restart after reap");auto events=finish(c);
  check(!events.empty()&&events.back()["type"]=="complete","valid fake completion");}
