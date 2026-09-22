@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -167,5 +169,30 @@ RuntimeLoad read_runtime_snapshot(const std::string& json_bytes,const std::strin
     loaded.snapshot.snapshot_hash=source_sha256;
     loaded.snapshot.state_epoch_ut_s=loaded.capture_ut_s;
     return loaded;
+}
+std::string format_no_leap_ut(const RuntimeLoad& load,double ut_s){
+    if(!std::isfinite(ut_s)||!std::isfinite(load.display_origin_ut_s))
+        throw RuntimeReaderError("calendar UT and display origin must be finite");
+    if(!std::isfinite(load.display_day_duration_s)||load.display_day_duration_s<=0)
+        throw RuntimeReaderError("calendar day duration must be positive and finite");
+    const long double day_duration=load.display_day_duration_s;
+    const long double elapsed=static_cast<long double>(ut_s)-load.display_origin_ut_s;
+    const long double day_index=std::floor(elapsed/day_duration);
+    // Beyond this range, individual SI seconds cannot be represented usefully.
+    if(!std::isfinite(day_index)||std::abs(day_index)>9.0e15L)
+        throw RuntimeReaderError("calendar UT outside display range");
+    const auto whole_day=static_cast<long long>(day_index);
+    long long year=whole_day/365;
+    long long ordinal=whole_day%365;
+    if(ordinal<0){ordinal+=365;--year;}
+    const long double seconds_in_day=elapsed-day_index*day_duration;
+    long long clock=static_cast<long long>(std::floor(seconds_in_day*86400.0L/day_duration));
+    if(clock>=86400){clock=0;++ordinal;if(ordinal==365){ordinal=0;++year;}}
+    if(clock<0||clock>=86400)throw RuntimeReaderError("calendar clock conversion failed");
+    std::ostringstream label;
+    label<<'Y'<<year<<" D"<<ordinal<<' '
+         <<std::setfill('0')<<std::setw(2)<<clock/3600<<':'
+         <<std::setw(2)<<(clock/60)%60<<':'<<std::setw(2)<<clock%60;
+    return label.str();
 }
 }

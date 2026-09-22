@@ -10,10 +10,10 @@ Recorded runtime counters, not an invoice or weekly-limit estimate. Model attrib
 |---|---|---:|---:|---:|---:|---:|---:|
 | gpt-6-astra | high | 1 | 54319 | 326528 | 2325 | 175 | 383172 |
 | gpt-6-astra | medium | 1 | 206571 | 2700032 | 15499 | 852 | 2922102 |
-| gpt-6-sol | high | 3 | 302250 | 5536000 | 38274 | 17078 | 5876524 |
-| gpt-6-sol | medium | 2 | 401728 | 31385856 | 152536 | 38592 | 31940120 |
-| gpt-6-sol | xhigh | 1 | 1205251 | 93690368 | 361112 | 157746 | 95256731 |
+| gpt-6-sol | high | 3 | 317104 | 6485760 | 42373 | 18964 | 6845237 |
+| gpt-6-sol | medium | 2 | 458784 | 38703232 | 182498 | 47743 | 39344514 |
+| gpt-6-sol | xhigh | 1 | 1333613 | 105998464 | 402984 | 179528 | 107735061 |
 
-Captured UTC: 2026-09-22T21:59:35.7196092Z
+Captured UTC: 2026-09-22T22:20:29.5648432Z
 
 See token-usage.csv for per-session roles, source paths and each counter timestamp. Refresh next turn to include the coordinator final response.

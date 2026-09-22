@@ -1,6 +1,6 @@
 # Dependencies proposed for M2-M6
 
-Status: the user approved this consolidated list and CI on 22 September 2026. MSYS2 UCRT64 and the listed Windows packages are installed on the development host. The current Windows host also has .NET 10 and MSYS2 CMake/Ninja. The workflow now installs the approved GTK and OpenGL packages for native Ubuntu and Windows GTK build checks. CI results for those new jobs remain pending until the next push.
+Status: the user approved this consolidated list and CI on 22 September 2026. MSYS2 UCRT64 and the listed Windows packages are installed on the development host. The current Windows host also has .NET 10 and MSYS2 CMake/Ninja. The workflow installs the approved GTK and OpenGL packages for native Ubuntu and Windows GTK build checks. [Run 35790038618](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35790038618) passed all six Ubuntu/Windows jobs, including both GTK/worker build checks; this verifies compilation and tests, not native Ubuntu rendering or a standalone installer.
 
 The full product retains the planned C++ numerical worker, GTK 4/gtkmm desktop interface, and the existing .NET importer. Ubuntu is the primary build target, with a Windows build as well. Package versions can differ between distributions; the code must be tested on both.
 

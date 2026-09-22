@@ -48,3 +48,15 @@ The `milestones/m5-import.json` checkpoint was captured at 21:59:35 UTC. It incl
 | gpt-6-sol | high | 930,123 | 910,976 | 19,147 | 4,971 | 2,271 |
 
 Astra and Luna have no additional recorded tokens in either interval. Total input already includes cached input, and reasoning is a subset of output. These are recorded tokens from registered sessions, not billing, account usage percentage or a price estimate. The active coordinator's final response is included only after the next turn refreshes the ledger.
+
+## M5 import to M6 route-screening checkpoint
+
+The `milestones/m6-route.json` checkpoint was captured at 22:20:29 UTC. This interval includes the reviewed synthetic route assembler, no-leap display code, runtime dependency work, CI checks, desktop placement diagnosis and intervening conversation. It is not an isolated model benchmark.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 12,436,458 | 12,308,096 | 128,362 | 41,872 | 21,782 |
+| gpt-6-sol | medium | 7,374,432 | 7,317,376 | 57,056 | 29,962 | 9,151 |
+| gpt-6-sol | high | 964,614 | 949,760 | 14,854 | 4,099 | 1,886 |
+
+No Astra or Luna tokens increased in this interval. Input includes cached input; reasoning is part of output. These are recorded runtime counters, not billing or account-wide usage. The active coordinator's final response remains outside this capture until the next refresh.

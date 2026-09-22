@@ -1,6 +1,7 @@
 #include "RuntimeReader.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 using namespace ksp;
 namespace {
@@ -39,6 +40,14 @@ void run(){
     check(loaded.atmosphere_boundaries.size()==2&&loaded.atmosphere_boundaries[0].altitude_m==0&&
           loaded.atmosphere_boundaries[1].altitude_m==1e5,"explicit atmosphere none and height");
     check(loaded.snapshot.bodies[1].state->position_m.x==1e11,"Cartesian state");
+    check(format_no_leap_ut(loaded,0)=="Y0 D0 00:00:00","calendar origin");
+    check(format_no_leap_ut(loaded,365*86400.0)=="Y1 D0 00:00:00","calendar year boundary has no leap day");
+    check(format_no_leap_ut(loaded,-1)=="Y-1 D364 23:59:59","calendar negative UT");
+    auto short_day=loaded;short_day.display_day_duration_s=21600;
+    check(format_no_leap_ut(short_day,5400)=="Y0 D0 06:00:00","calendar honors display day duration");
+    rejects([&]{format_no_leap_ut(loaded,std::numeric_limits<double>::quiet_NaN());},"finite");
+    short_day.display_day_duration_s=0;
+    rejects([&]{format_no_leap_ut(short_day,0);},"day duration");
     ksp::Settings request;request.start_ut_s=0;request.end_ut_s=1000;request.step_s=100;
     request.max_position_fit_error_m=100;request.max_velocity_fit_error_mps=0.01;
     auto ephemeris=integrate(loaded.snapshot,request);

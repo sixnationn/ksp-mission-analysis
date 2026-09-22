@@ -251,6 +251,8 @@ private:
             auto& loaded=prepared.load;
             const std::string details="Runtime capture · "+loaded.exporter_id+" v"+loaded.exporter_version+
                 " · KSP "+loaded.game_version+" · save "+loaded.save_id+" · capture UT "+fixed(loaded.capture_ut_s,0)+" s"+
+                "\nNo-leap display: "+format_no_leap_ut(loaded,loaded.capture_ut_s)+
+                " · day "+fixed(loaded.display_day_duration_s,0)+" SI s · origin UT "+fixed(loaded.display_origin_ut_s,0)+" s"+
                 "\nPrincipia state source · observed, not compared to installed game";
             snapshot_=std::move(loaded.snapshot);ephemeris_=std::move(prepared.preview);
             source_details_=details;runtime_loaded_=true;view_.reload();refresh_source();select(snapshot_.bodies.size()>1?1:0);
@@ -280,10 +282,15 @@ private:
             button->signal_clicked().connect([this,i]{select(i);});body_rows_.append(*button);
         }
         while(auto* child=fields_.get_first_child())fields_.remove(*child);
-        const auto role=[this](std::size_t index){return index<snapshot_.bodies.size()?snapshot_.bodies[index].id:std::string("Unassigned");};
-        const auto suffix=runtime_loaded_?" · runtime observed":" · synthetic";
-        append_field(fields_,"HOME BODY",role(1)+suffix);append_field(fields_,"MARS ROLE",role(2)+suffix);
-        append_field(fields_,"VENUS ROLE",role(3)+suffix);append_field(fields_,"CENTRAL BODY",role(0)+suffix);
+        const auto synthetic_role=[this](std::size_t index){return index<snapshot_.bodies.size()?snapshot_.bodies[index].id+" · synthetic":std::string("Unassigned");};
+        const auto suggested_role=[this](const std::string& id){
+            const auto found=std::find_if(snapshot_.bodies.begin(),snapshot_.bodies.end(),[&](const Body& body){return body.id==id;});
+            return found==snapshot_.bodies.end()?std::string("Unassigned · exact ID not found"):id+" · suggested, unconfirmed";
+        };
+        append_field(fields_,"HOME BODY",runtime_loaded_?suggested_role("JNSQKerbin"):synthetic_role(1));
+        append_field(fields_,"MARS ROLE",runtime_loaded_?suggested_role("JNSQDuna"):synthetic_role(2));
+        append_field(fields_,"VENUS ROLE",runtime_loaded_?suggested_role("JNSQEve"):synthetic_role(3));
+        append_field(fields_,"CENTRAL BODY",runtime_loaded_?suggested_role("JNSQSun"):synthetic_role(0));
         append_field(fields_,"LAUNCH WINDOW","UT "+fixed(ephemeris_.metadata.start_ut_s,0)+"–"+fixed(ephemeris_.metadata.end_ut_s,0)+" s · preview only");
         append_field(fields_,"FLIGHT TIME","Not configured · SI seconds");
         append_field(fields_,"PARKING STAY","5,184,000 SI seconds fixed");
@@ -381,7 +388,8 @@ int main(int argc,char** argv){
             if(!command_error.empty())throw std::runtime_error(command_error);
             const auto prepared=prepare_runtime(path,hash);
             std::cout<<"ACCEPTED "<<prepared.load.snapshot.snapshot_hash<<' '<<prepared.load.snapshot.confidence<<' '
-                <<prepared.load.snapshot.bodies.size()<<" bodies UT "<<prepared.preview.metadata.start_ut_s<<".."<<prepared.preview.metadata.end_ut_s<<" s\n";
+                <<prepared.load.snapshot.bodies.size()<<" bodies UT "<<prepared.preview.metadata.start_ut_s<<".."<<prepared.preview.metadata.end_ut_s
+                <<" s no-leap "<<format_no_leap_ut(prepared.load,prepared.load.capture_ut_s)<<'\n';
             return 0;
         }catch(const std::exception& error){std::cerr<<"REJECTED "<<error.what()<<'\n';return 1;}
     }
