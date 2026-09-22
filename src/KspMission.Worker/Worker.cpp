@@ -1,8 +1,11 @@
 #include "Worker.hpp"
 #include "SearchGrid.hpp"
 #include "Refine.hpp"
+#include "RuntimeReader.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -53,12 +56,8 @@ bool better(const DatedLegCandidate& a,const DatedLegCandidate& b){
     if(a.flight_time_s!=b.flight_time_s)return a.flight_time_s<b.flight_time_s;
     return a.tie_key<b.tie_key;
 }
-std::string candidate_id(const GridRequest& q,const DatedLegCandidate& a){
-    const auto launch=static_cast<std::uint64_t>(std::llround((a.departure_ut_s-q.launch_start_ut_s)/q.launch_step_s));
-    const auto flight=static_cast<std::uint64_t>(std::llround((a.flight_time_s-q.flight_min_s)/q.flight_step_s));
-    return std::string(fixture_hash)+":"+std::to_string(q.stable_seed)+":"+std::to_string(launch)+":"+std::to_string(flight);
-}
-json candidate_json(const GridRequest& q,const DatedLegCandidate& a){return {{"type","candidate"},{"candidate_id",candidate_id(q,a)},{"status","screened_seed"},
+json candidate_json(const GridRequest& q,const DatedLegCandidate& a){return {{"type","candidate"},{"candidate_id",worker_candidate_id(q,a)},{"status","screened_seed"},
+    {"snapshot_hash",a.snapshot_hash},{"source_confidence",a.source_confidence},
     {"departure_ut_s",a.departure_ut_s},{"arrival_ut_s",a.arrival_ut_s},{"flight_time_s",a.flight_time_s},
     {"departure_velocity_mps",vector_json(a.departure_barycentric_velocity_mps)},
     {"arrival_velocity_mps",vector_json(a.arrival_barycentric_velocity_mps)},
@@ -72,6 +71,31 @@ json ranked_json(const GridRequest& q,std::vector<DatedLegCandidate> candidates)
     for(std::size_t i=0;i<candidates.size();++i){auto row=candidate_json(q,candidates[i]);row.erase("type");row["rank"]=i+1;ranked.push_back(std::move(row));}
     return ranked;
 }
+bool lower_sha256(const std::string& hash){
+    return hash.size()==64&&std::all_of(hash.begin(),hash.end(),[](unsigned char c){return std::isdigit(c)||(c>='a'&&c<='f');});
+}
+}
+
+std::string worker_candidate_id(const GridRequest& q,const DatedLegCandidate& a){
+    const auto launch=static_cast<std::uint64_t>(std::llround((a.departure_ut_s-q.launch_start_ut_s)/q.launch_step_s));
+    const auto flight=static_cast<std::uint64_t>(std::llround((a.flight_time_s-q.flight_min_s)/q.flight_step_s));
+    const auto& m=a.ephemeris_metadata;
+    const json key={{"snapshot_hash",a.snapshot_hash},{"central_body_id",q.central_body_id},
+        {"departure_body_id",q.departure_body_id},{"arrival_body_id",q.arrival_body_id},
+        {"branch",q.branch==TransferBranch::short_path?"short":"long"},
+        {"direction",q.direction==AngularMomentumDirection::positive?"positive":"negative"},
+        {"launch_start_ut_s",q.launch_start_ut_s},{"launch_end_ut_s",q.launch_end_ut_s},{"launch_step_s",q.launch_step_s},
+        {"flight_min_s",q.flight_min_s},{"flight_max_s",q.flight_max_s},{"flight_step_s",q.flight_step_s},
+        {"reference_normal",vector_json(q.reference_normal)},
+        {"max_position_residual_m",q.max_position_residual_m},{"max_velocity_residual_mps",q.max_velocity_residual_mps},
+        {"central_atmosphere_altitude_m",q.central_atmosphere_altitude_m?json(*q.central_atmosphere_altitude_m):json(nullptr)},
+        {"central_safety_margin_m",q.central_safety_margin_m},{"max_candidates",q.max_candidates},
+        {"max_grid_cells",q.max_grid_cells},{"stable_seed",q.stable_seed},
+        {"ephemeris_start_ut_s",m.start_ut_s},{"ephemeris_end_ut_s",m.end_ut_s},{"ephemeris_step_s",m.step_s},
+        {"ephemeris_fit_position_m",m.max_position_fit_error_m},{"ephemeris_fit_velocity_mps",m.max_velocity_fit_error_mps},
+        {"ephemeris_integrator",m.integrator},{"ephemeris_integrator_version",m.integrator_version},
+        {"ephemeris_force_model",m.force_model},{"ephemeris_result_label",m.result_label}};
+    return a.snapshot_hash+":"+sha256_hex(key.dump())+":"+std::to_string(launch)+":"+std::to_string(flight);
 }
 
 bool is_cancel_line(const std::string& line,const std::string& request_id){
@@ -81,10 +105,11 @@ bool is_cancel_line(const std::string& line,const std::string& request_id){
         message.contains("request_id")&&message["request_id"].is_string()&&message["request_id"]==request_id;
 }
 
-void process_start_line(const std::string& line,const WorkerEmit& emit,const WorkerCancel& cancelled){
-    json input=json::parse(line,nullptr,false);std::string id;
+void process_start_line(const std::string& line,const WorkerEmit& emit,const WorkerCancel& cancelled,
+                        const WorkerAfterRead& after_runtime_bytes_read_for_test){
+    json input=json::parse(line,nullptr,false);std::string id,source_hash,source_confidence;
     auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
-        if(event.value("type",std::string{})!="error"){event["snapshot_hash"]=fixture_hash;event["source_confidence"]="synthetic_fixture";}
+        if(!source_hash.empty()){event["snapshot_hash"]=source_hash;event["source_confidence"]=source_confidence;}
         emit(event);};
     auto error=[&](const char* code,const std::string& detail){send({{"type","error"},{"code",code},{"detail",detail}});};
     if(input.is_discarded()){error("invalid_json","malformed JSON line");return;}
@@ -95,17 +120,70 @@ void process_start_line(const std::string& line,const WorkerEmit& emit,const Wor
     bool work_started=false;
     try{
         const auto& source=input.at("source");
-        if(source.at("mode")!="synthetic_fixture")throw std::invalid_argument("only synthetic_fixture source is supported");
-        if(source.at("expected_snapshot_hash")!=fixture_hash){error("source_mismatch","expected_snapshot_hash differs from fixture");return;}
+        const auto mode=source.at("mode").get<std::string>();
+        Snapshot snapshot;Settings settings;std::optional<RuntimeLoad> runtime;
+        if(mode=="synthetic_fixture"){
+            if(source.at("expected_snapshot_hash")!=fixture_hash){error("source_mismatch","expected_snapshot_hash differs from fixture");return;}
+            snapshot=fixture();source_hash=snapshot.snapshot_hash;source_confidence=snapshot.confidence;
+            settings.start_ut_s=0;settings.end_ut_s=5000;settings.step_s=1;
+            settings.max_position_fit_error_m=10;settings.max_velocity_fit_error_mps=0.003;
+        }else if(mode=="runtime_snapshot"){
+            const auto path=source.at("path").get<std::string>();
+            const auto expected=source.at("expected_snapshot_hash").get<std::string>();
+            if(path.empty()||!lower_sha256(expected))throw std::invalid_argument("runtime path and 64 lowercase SHA-256 required");
+            std::ifstream file(path,std::ios::binary|std::ios::ate);
+            if(!file){error("source_read_failed","cannot open runtime snapshot");return;}
+            const auto length=file.tellg();
+            if(length<0){error("source_read_failed","cannot size runtime snapshot");return;}
+            constexpr std::streamoff max_bytes=16*1024*1024;
+            if(length>max_bytes){error("source_too_large","runtime snapshot exceeds 16 MiB");return;}
+            std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+            if(!file.read(bytes.data(),length)){error("source_read_failed","cannot read complete runtime snapshot");return;}
+            if(after_runtime_bytes_read_for_test)after_runtime_bytes_read_for_test();
+            file.clear();file.seekg(0,std::ios::end);
+            if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed during read");return;}
+            if(sha256_hex(bytes)!=expected){error("source_mismatch","source hash mismatch for exact snapshot bytes");return;}
+            try{runtime=read_runtime_snapshot(bytes,expected);}catch(const RuntimeReaderError& issue){error("invalid_source",issue.what());return;}
+            file.clear();file.seekg(0,std::ios::end);
+            if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed before source acceptance");return;}
+            snapshot=runtime->snapshot;source_hash=snapshot.snapshot_hash;source_confidence=snapshot.confidence;
+            const auto& ep=input.at("ephemeris");
+            settings.start_ut_s=runtime->capture_ut_s;
+            settings.end_ut_s=ep.at("end_ut_s").get<double>();settings.step_s=ep.at("step_s").get<double>();
+            settings.max_position_fit_error_m=ep.at("max_position_fit_error_m").get<double>();
+            settings.max_velocity_fit_error_mps=ep.at("max_velocity_fit_error_mps").get<double>();
+            const double steps=(settings.end_ut_s-settings.start_ut_s)/settings.step_s;
+            if(!std::isfinite(settings.end_ut_s)||!std::isfinite(settings.step_s)||settings.step_s<=0||
+               !std::isfinite(settings.max_position_fit_error_m)||settings.max_position_fit_error_m<=0||
+               !std::isfinite(settings.max_velocity_fit_error_mps)||settings.max_velocity_fit_error_mps<=0||
+               settings.end_ut_s<=settings.start_ut_s||!std::isfinite(steps)||steps>100000||steps<1||
+               std::abs(steps-std::round(steps))>1e-9)throw std::invalid_argument("runtime ephemeris settings or step limit invalid");
+            settings.max_steps=100000;
+        }else throw std::invalid_argument("unsupported source mode");
         auto q=grid_request(input.at("grid"));
         const auto nlaunch=cells(q.launch_start_ut_s,q.launch_end_ut_s,q.launch_step_s),nflight=cells(q.flight_min_s,q.flight_max_s,q.flight_step_s);
         if(nlaunch>100000/nflight||nlaunch*nflight>q.max_grid_cells||q.max_grid_cells>1000000)throw std::invalid_argument("grid cell limit");
-        if(q.launch_start_ut_s<0||q.launch_end_ut_s+q.flight_max_s>5000||q.flight_min_s<=0)throw std::invalid_argument("ephemeris coverage");
+        if(q.launch_start_ut_s<settings.start_ut_s||q.launch_end_ut_s+q.flight_max_s>settings.end_ut_s||q.flight_min_s<=0)
+            throw std::invalid_argument("ephemeris coverage");
+        if(runtime){
+            auto found=std::find_if(runtime->atmosphere_boundaries.begin(),runtime->atmosphere_boundaries.end(),
+                [&](const AtmosphereBoundary& b){return b.body_id==q.central_body_id;});
+            if(found==runtime->atmosphere_boundaries.end())throw std::invalid_argument("central atmosphere missing from runtime snapshot");
+            if(q.central_atmosphere_altitude_m&&*q.central_atmosphere_altitude_m!=found->altitude_m)
+                throw std::invalid_argument("central atmosphere disagrees with runtime snapshot");
+            q.central_atmosphere_altitude_m=found->altitude_m;
+            for(const auto& body_id:{q.central_body_id,q.departure_body_id,q.arrival_body_id})
+                if(std::none_of(snapshot.bodies.begin(),snapshot.bodies.end(),[&](const Body& b){return b.id==body_id;}))
+                    throw std::invalid_argument("unknown runtime body ID: "+body_id);
+        }
         if(!q.max_candidates||!q.central_atmosphere_altitude_m)throw std::invalid_argument("candidate cap and central atmosphere required");
         bool refine_enabled=false;
         if(input.contains("refine"))refine_enabled=input.at("refine").at("enabled").get<bool>();
-        const auto snapshot=fixture();Settings settings;settings.start_ut_s=0;settings.end_ut_s=5000;settings.step_s=1;settings.max_position_fit_error_m=10;settings.max_velocity_fit_error_mps=0.003;
+        if(runtime&&refine_enabled)throw std::invalid_argument("runtime refinement is not enabled in this screening slice");
         send({{"type","started"},{"total_cells",nlaunch*nflight},{"frame_origin",snapshot.frame.origin},{"frame_axes",snapshot.frame.axes},
+            {"frame_handedness",snapshot.frame.handedness},{"frame_inertial",snapshot.frame.inertial},
+            {"coverage_start_ut_s",settings.start_ut_s},{"coverage_end_ut_s",settings.end_ut_s},
+            {"force_model","newtonian_point_mass"},{"source_mode",mode},
             {"units","SI"},{"result_label",settings.result_label},{"cancellation_guarantee","checkpoint_only"},
             {"non_interruptible_stages",json::array({"ephemeris_integration","individual_grid_cell","terminal_position_refinement"})}});
         work_started=true;

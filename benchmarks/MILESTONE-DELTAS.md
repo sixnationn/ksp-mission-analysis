@@ -60,3 +60,15 @@ The `milestones/m6-route.json` checkpoint was captured at 22:20:29 UTC. This int
 | gpt-6-sol | high | 964,614 | 949,760 | 14,854 | 4,099 | 1,886 |
 
 No Astra or Luna tokens increased in this interval. Input includes cached input; reasoning is part of output. These are recorded runtime counters, not billing or account-wide usage. The active coordinator's final response remains outside this capture until the next refresh.
+
+## M6 route screen to M4 runtime worker checkpoint
+
+The `milestones/m4-runtime-worker.json` checkpoint was captured at 22:33:21 UTC. It includes the runtime-snapshot worker mode, import/provenance review and fixes, CI completion, desktop-status work, and intervening conversation. The milestones record completion order rather than numerical milestone numbering.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 8,019,973 | 7,974,144 | 45,829 | 17,495 | 7,760 |
+| gpt-6-sol | medium | 4,083,883 | 4,049,920 | 33,963 | 17,564 | 7,087 |
+| gpt-6-sol | high | 971,388 | 951,680 | 19,708 | 3,445 | 1,981 |
+
+No Astra or Luna tokens increased. Total input includes cached input, and reasoning is a subset of output. These are registered runtime counters, not billing or the account's weekly usage percentage. The active coordinator's final response will enter the ledger at the next turn's refresh.
