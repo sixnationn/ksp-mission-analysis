@@ -1,0 +1,58 @@
+{
+  "milestone": "M0/M1 start",
+  "generated_at_utc": "2026-09-22T19:06:44.2525231Z",
+  "sessions": [
+    {
+      "role": "planning coordinator",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "medium",
+      "input_tokens": 2906603,
+      "cached_input_tokens": 2700032,
+      "uncached_input_tokens": 206571,
+      "output_tokens": 15499,
+      "reasoning_output_tokens": 852,
+      "total_tokens": 2922102,
+      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-49-32-01a0ca73-a8b8-7680-a438-5540f36ae0b4.jsonl",
+      "as_of": "2026-09-22T19:05:47.815Z"
+    },
+    {
+      "role": "numerical architecture adviser",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "high",
+      "input_tokens": 380847,
+      "cached_input_tokens": 326528,
+      "uncached_input_tokens": 54319,
+      "output_tokens": 2325,
+      "reasoning_output_tokens": 175,
+      "total_tokens": 383172,
+      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-49-57-01a0ca74-088c-7693-b166-371cbc416803.jsonl",
+      "as_of": "2026-09-22T18:51:43.021Z"
+    },
+    {
+      "role": "KSP import researcher",
+      "model": "gpt-6-sol",
+      "reasoning_effort": "high",
+      "input_tokens": 1669646,
+      "cached_input_tokens": 1582336,
+      "uncached_input_tokens": 87310,
+      "output_tokens": 4659,
+      "reasoning_output_tokens": 742,
+      "total_tokens": 1674305,
+      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-50-06-01a0ca74-2cbf-7522-9c27-2685a5e09848.jsonl",
+      "as_of": "2026-09-22T18:53:28.356Z"
+    },
+    {
+      "role": "M0/M1 coordinator",
+      "model": "gpt-6-sol",
+      "reasoning_effort": "xhigh",
+      "input_tokens": 181509,
+      "cached_input_tokens": 129920,
+      "uncached_input_tokens": 51589,
+      "output_tokens": 1731,
+      "reasoning_output_tokens": 674,
+      "total_tokens": 183240,
+      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
+      "as_of": "2026-09-22T19:06:40.654Z"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "source": [
+    "benchmarks/milestones/start.json",
+    "benchmarks/milestones/m0.json",
+    "benchmarks/milestones/m1.json"
+  ],
+  "captured_at_utc": "2026-09-22T19:46:01.0114026Z",
+  "roles": [
+    {
+      "id": "gpt-6-sol|xhigh",
+      "label": "Coordinator",
+      "effort": "xhigh",
+      "input_tokens": 19021663,
+      "cached_input_tokens": 18794240,
+      "output_tokens": 84091,
+      "reasoning_output_tokens": 41474,
+      "fresh": 227423
+    },
+    {
+      "id": "gpt-6-sol|medium",
+      "label": "Builder",
+      "effort": "medium",
+      "input_tokens": 5267306,
+      "cached_input_tokens": 5152384,
+      "output_tokens": 27316,
+      "reasoning_output_tokens": 5110,
+      "fresh": 114922
+    },
+    {
+      "id": "gpt-6-sol|high",
+      "label": "Reviewer",
+      "effort": "high",
+      "input_tokens": 1591972,
+      "cached_input_tokens": 1476480,
+      "output_tokens": 9279,
+      "reasoning_output_tokens": 2723,
+      "fresh": 115492
+    }
+  ],
+  "periods": [
+    {
+      "label": "M0 checkpoint",
+      "input_tokens": 14997854,
+      "cached_input_tokens": 14782464,
+      "output_tokens": 61122,
+      "reasoning_output_tokens": 22892,
+      "fresh": 215390
+    },
+    {
+      "label": "M1 checkpoint",
+      "input_tokens": 10883087,
+      "cached_input_tokens": 10640640,
+      "output_tokens": 59564,
+      "reasoning_output_tokens": 26415,
+      "fresh": 242447
+    }
+  ],
+  "overall": {
+    "input_tokens": 25880941,
+    "cached_input_tokens": 25423104,
+    "output_tokens": 120686,
+    "reasoning_output_tokens": 49307,
+    "fresh": 457837
+  },
+  "cache_share_percent": 98.23098781454662,
+  "account_usage_snapshot": {
+    "source": "Codex account get_usage_limits",
+    "captured_at_utc": "2026-09-22T20:00:56Z",
+    "window_duration_minutes": 10080,
+    "used_percent": 66,
+    "remaining_percent": 34,
+    "resets_at_utc": "2026-09-26T16:18:06Z"
+  }
+}

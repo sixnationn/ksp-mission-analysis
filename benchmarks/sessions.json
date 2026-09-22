@@ -1,0 +1,8 @@
+[
+  {"role":"planning coordinator","status":"completed","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-49-32-01a0ca73-a8b8-7680-a438-5540f36ae0b4.jsonl"},
+  {"role":"numerical architecture adviser","status":"completed","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-49-57-01a0ca74-088c-7693-b166-371cbc416803.jsonl"},
+  {"role":"KSP import researcher","status":"completed","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T19-50-06-01a0ca74-2cbf-7522-9c27-2685a5e09848.jsonl"},
+  {"role":"M0/M1 coordinator","status":"active snapshot","model":"gpt-6-sol","reasoning_effort":"xhigh","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl"},
+  {"role":"M1 importer builder","status":"completed","model":"gpt-6-sol","reasoning_effort":"medium","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-16-20-01a0ca8c-3271-7183-bb7e-d17b6ca62a53.jsonl"},
+  {"role":"M1 import contract reviewer","status":"completed","model":"gpt-6-sol","reasoning_effort":"high","path":"C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-28-48-01a0ca97-9a82-70a0-aaac-dbb7861d5127.jsonl"}
+]
