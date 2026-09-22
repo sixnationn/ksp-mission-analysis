@@ -30,6 +30,10 @@ The requested tool display calendar uses a 86,400 SI-second day, 365 days and no
 - There is no resolved ModuleManager cache, loaded JNSQ/Principia save, Cartesian body state, common state epoch, validated frame, or verified force model. No trajectories or Principia-equivalence claim can use this catalog as a ready numerical snapshot.
 - The importer selects a bounded subset of raw fields and known Real rescale patches. Other ModuleManager conditions and physical/calendar patches remain diagnostics; a complete in-game resolution needs a controlled modded KSP load and export.
 - Stock, JNSQ Standard, JNSQ optional 10X and Reborn Standard have not been compared as full fixture matrices. The M1 validated fixture is Reborn Real with Principia on/off.
-- Ubuntu native build/run, packaging, and KSP runtime comparison remain unverified. Windows publish and executable imports passed; the portable .NET artifact is Linux compatible by design but was built on Windows.
+- At the M1 checkpoint, Ubuntu native build/run, packaging and KSP runtime comparison were unverified. Windows publish and executable imports passed; the portable .NET artifact was built on Windows.
 
 M1 stops here. The optimizer and UI have not been started.
+
+## Subsequent cross-platform check
+
+[GitHub Actions run 35780328709](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35780328709) passed on Ubuntu 24.04 and Windows 2022. Both jobs ran the 24 focused importer checks and published their importer artifact. This confirms native Ubuntu build and focused test execution; it does not supply a loaded JNSQ/Principia save or an in-game comparison.

@@ -38,3 +38,18 @@ jobs:
           path: ${{ matrix.output }}
           if-no-files-found: error
           retention-days: 7
+
+  ephemeris:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure C++ core
+        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Release
+      - name: Build C++ core
+        run: cmake --build build/ci --config Release
+      - name: Test C++ core
+        run: ctest --test-dir build/ci -C Release --output-on-failure
