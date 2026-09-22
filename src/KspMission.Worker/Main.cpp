@@ -1,5 +1,6 @@
 #include "Worker.hpp"
 #include <atomic>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -18,4 +19,9 @@ int main(){
         }
     }).detach();
     ksp::process_start_line(line,[](const nlohmann::json& event){std::cout<<event.dump()<<std::endl;},[cancelled](){return cancelled->load();});
+    // The detached cancellation reader may still hold std::cin's lock in a
+    // blocking read. Flush the terminal event, then end this one-request
+    // process without running iostream static teardown against that reader.
+    std::cout.flush();
+    std::_Exit(0);
 }
