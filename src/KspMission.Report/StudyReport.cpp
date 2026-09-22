@@ -1,4 +1,5 @@
 #include "StudyReport.hpp"
+#include "RuntimeReader.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -162,8 +163,13 @@ void validate_study_report(const json& document){
     number(calendar,"display_origin_ut_s");
     const auto& months=array(calendar,"month_lengths");
     if(months.size()!=12)throw StudyReportError("calendar month_lengths invalid");
-    for(const auto& month:months)if(!month.is_number_integer()||month.get<int>()<=0)
-        throw StudyReportError("calendar month_lengths invalid");
+    int days=0;
+    for(const auto& month:months){
+        if(!month.is_number_integer()||month.get<int>()<=0)
+            throw StudyReportError("calendar month_lengths invalid");
+        days+=month.get<int>();
+    }
+    if(days!=365)throw StudyReportError("calendar month_lengths must total 365");
     const auto& result=object(document,"result");
     const auto status=string(result,"status");
     if(status!="complete"&&status!="cancelled")throw StudyReportError("result status invalid");
@@ -219,6 +225,70 @@ void validate_study_report(const json& document){
         prior_total=total;
         if(number(route,"flyby_periapsis_margin_m")<0)throw StudyReportError("unsafe flyby margin");
     }
+}
+json compose_runtime_study_report(const std::string& runtime_json_bytes,
+    const std::string& expected_sha256,const json& request,const json& terminal){
+    try{
+        const auto loaded=read_runtime_snapshot(runtime_json_bytes,expected_sha256);
+        const auto raw=json::parse(runtime_json_bytes);
+        if(!request.is_object()||request.at("protocol_version")!=1||
+           request.at("command")!="start_mission")
+            throw StudyReportError("mission request invalid");
+        const auto& request_source=object(request,"source");
+        if(string(request_source,"mode")!="runtime_snapshot"||
+           string(request_source,"expected_snapshot_hash")!=expected_sha256||
+           string(request_source,"expected_frame_origin")!=loaded.snapshot.frame.origin||
+           string(request_source,"expected_frame_axes")!=loaded.snapshot.frame.axes||
+           number(request_source,"expected_state_epoch_ut_s")!=loaded.capture_ut_s)
+            throw StudyReportError("request source mismatch");
+        if(!terminal.is_object()||terminal.at("protocol_version")!=1||
+           (terminal.at("type")!="complete"&&terminal.at("type")!="cancelled")||
+           string(terminal,"request_id")!=string(request,"request_id"))
+            throw StudyReportError("terminal request_id or status mismatch");
+        if(string(terminal,"snapshot_hash")!=expected_sha256||
+           string(terminal,"source_confidence")!=loaded.snapshot.confidence)
+            throw StudyReportError("terminal source mismatch");
+        const auto& ephemeris=object(terminal,"ephemeris_metadata");
+        const auto& ephemeris_request=object(request,"ephemeris");
+        if(number(ephemeris,"start_ut_s")!=loaded.capture_ut_s||
+           number(ephemeris,"end_ut_s")!=number(ephemeris_request,"end_ut_s")||
+           number(ephemeris,"step_s")!=number(ephemeris_request,"step_s")||
+           number(ephemeris,"max_position_fit_error_m")!=number(ephemeris_request,"max_position_fit_error_m")||
+           number(ephemeris,"max_velocity_fit_error_mps")!=number(ephemeris_request,"max_velocity_fit_error_mps"))
+            throw StudyReportError("ephemeris settings mismatch");
+        auto mission=object(request,"mission");
+        mission["flight_grids"]=array(mission,"legs");mission.erase("legs");
+        // The first worker protocol fixes the stay to a parking orbit.
+        mission["stay_type"]="parking_orbit";
+        if(count(mission,"max_routes")>128)throw StudyReportError("worker route limit invalid");
+        auto calendar=object(raw,"calendar");calendar["display_only"]=true;
+        json routes=json::array();
+        const auto& ranked=array(terminal,"ranked_routes");
+        if(ranked.size()>128)throw StudyReportError("terminal route limit invalid");
+        for(std::size_t i=0;i<ranked.size();++i){
+            auto route=ranked[i];
+            if(count(route,"rank")!=i+1)throw StudyReportError("terminal route rank invalid");
+            route["legs"]=json::array({object(route,"home_mars"),object(route,"mars_venus"),
+                object(route,"venus_home")});
+            route["flyby_periapsis_margin_m"]=number(route,"venus_periapsis_margin_m");
+            routes.push_back(std::move(route));
+        }
+        json document={{"schema_version",1},
+            {"source",{{"snapshot_hash",expected_sha256},{"confidence",loaded.snapshot.confidence},
+                {"exporter_id",loaded.exporter_id},{"exporter_version",loaded.exporter_version},
+                {"game_version",loaded.game_version},{"save_id",loaded.save_id},
+                {"capture_ut_s",loaded.capture_ut_s},{"frame_origin",loaded.snapshot.frame.origin},
+                {"frame_axes",loaded.snapshot.frame.axes},{"frame_handedness",loaded.snapshot.frame.handedness},
+                {"frame_inertial",loaded.snapshot.frame.inertial},
+                {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s}}},
+            {"ephemeris",ephemeris},{"mission",mission},{"calendar",calendar},
+            {"result",{{"status",terminal.at("type")},{"validation_status","patched_conic_screen_only"},
+                {"sampled_cells",terminal.at("sampled_cells")},
+                {"total_upper_bound_cells",terminal.at("total_cells")},{"ranked_routes",routes}}}};
+        validate_study_report(document);
+        return document;
+    }catch(const StudyReportError&){throw;}
+    catch(const std::exception& issue){throw StudyReportError(std::string("report composition invalid: ")+issue.what());}
 }
 void save_study_report(const json& document,const std::filesystem::path& path){
     validate_study_report(document);

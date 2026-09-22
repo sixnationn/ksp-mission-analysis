@@ -72,3 +72,26 @@ The `milestones/m4-runtime-worker.json` checkpoint was captured at 22:33:21 UTC.
 | gpt-6-sol | high | 971,388 | 951,680 | 19,708 | 3,445 | 1,981 |
 
 No Astra or Luna tokens increased. Total input includes cached input, and reasoning is a subset of output. These are registered runtime counters, not billing or the account's weekly usage percentage. The active coordinator's final response will enter the ledger at the next turn's refresh.
+
+## M4 runtime worker to bounded search and worker-client checkpoint
+
+The `milestones/m6-bounded-worker-client.json` checkpoint was captured at 22:57:16 UTC. This interval includes the bounded three-leg search, headless worker client, substantive import/search reviews, the previous conversation and coordination. It is a recording interval, not isolated build-task consumption. The subsequent mission-worker implementation is outside this checkpoint.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 12,646,720 | 12,498,816 | 147,904 | 44,461 | 22,266 |
+| gpt-6-sol | medium | 3,914,330 | 3,834,624 | 79,706 | 28,275 | 9,762 |
+| gpt-6-sol | high | 519,144 | 509,312 | 9,832 | 1,953 | 1,181 |
+
+No Astra or Luna tokens increased. Cached input is included in total input, and reasoning is a subset of output. These are recorded tokens from registered sessions, not billing or account-limit consumption. The active coordinator's final response enters only after the next refresh.
+
+## Bounded search and worker client to runtime mission workflow checkpoint
+
+The `milestones/m5-runtime-workflow.json` checkpoint was captured at 23:26:03 UTC. This interval includes the mission worker, runtime mission form, report composition and headless validation. It is a recording interval, not isolated build-task consumption.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 22,748,021 | 22,547,456 | 200,565 | 62,395 | 23,502 |
+| gpt-6-sol | medium | 10,205,875 | 10,120,576 | 85,299 | 41,510 | 11,644 |
+
+Sol High, Astra and Luna recorded no new tokens in this interval. Cached input is included in total input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator's final response enters on the next refresh.

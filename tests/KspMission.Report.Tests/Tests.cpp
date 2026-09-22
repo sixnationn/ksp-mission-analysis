@@ -1,4 +1,5 @@
 #include "StudyReport.hpp"
+#include "RuntimeReader.hpp"
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -72,6 +73,8 @@ void cases(){
     runtime["source"].erase("game_version");
     rejects([&]{validate_study_report(runtime);},"game_version");
     wrong=original;wrong["source"]["frame_handedness"]="left";rejects([&]{validate_study_report(wrong);},"frame");
+    wrong=original;wrong["calendar"]["month_lengths"][1]=27;
+    rejects([&]{validate_study_report(wrong);},"month_lengths");
     wrong=original;wrong["ephemeris"]["step_s"]=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{validate_study_report(wrong);},"nonfinite");
     wrong=original;wrong["mission"]["fixed_stay_s"]=5184001;rejects([&]{validate_study_report(wrong);},"stay");
@@ -98,6 +101,65 @@ void cases(){
     rejects([&]{load_study_report(path);},"JSON");
     save_study_report(original,path);check(load_study_report(path)==original,"atomic replacement after bad file");
     std::filesystem::remove(path);
+    json runtime_source={{"schema_version",1},{"confidence","runtime_observed_uncompared"},
+        {"capture",{{"exporter_id","KspMission.RuntimeExporter"},{"exporter_version","1"},
+            {"game_version","1.12.5"},{"save_id","report-composer-test"},{"capture_ut_s",0.0},
+            {"principia_loaded",true},{"state_source","principia_celestial_from_parent"},
+            {"mods",json::array({{{"id","Principia"},{"version","test"}}})}}},
+        {"frame",{{"origin","system_barycenter"},{"axes","principia_alicesun_frozen_at_capture"},
+            {"handedness","right"},{"inertial",true},{"source_frame","Principia/AliceSun"},
+            {"transform_method","parent_relative_sum_then_com_translation"},{"transform_version","1"}}},
+        {"bodies",json::array({
+            {{"id","sun"},{"parent_id",nullptr},{"mu_m3_s2",1e20},{"radius_m",1e7},
+                {"atmosphere_boundary_m",nullptr},{"state_epoch_ut_s",0.0},{"position_m",{-3e9,-3e9,0}},{"velocity_mps",{-400,-200,0}}},
+            {{"id","home"},{"parent_id","sun"},{"mu_m3_s2",1e18},{"radius_m",1e6},
+                {"atmosphere_boundary_m",1e5},{"state_epoch_ut_s",0.0},{"position_m",{1e11,0,0}},{"velocity_mps",{30000,0,0}}},
+            {{"id","mars"},{"parent_id","sun"},{"mu_m3_s2",1e18},{"radius_m",1e6},
+                {"atmosphere_boundary_m",1e5},{"state_epoch_ut_s",0.0},{"position_m",{2e11,0,0}},{"velocity_mps",{0,20000,0}}},
+            {{"id","venus"},{"parent_id","sun"},{"mu_m3_s2",1e18},{"radius_m",1e6},
+                {"atmosphere_boundary_m",1e5},{"state_epoch_ut_s",0.0},{"position_m",{0,3e11,0}},{"velocity_mps",{10000,0,0}}}})},
+        {"calendar",{{"day_duration_s",86400},{"display_origin_ut_s",0},{"use_leap_years",false},
+            {"month_lengths",{31,28,31,30,31,30,31,31,30,31,30,31}}}}};
+    const auto runtime_bytes=runtime_source.dump();
+    const auto source_hash=sha256_hex(runtime_bytes);
+    json request={{"protocol_version",1},{"command","start_mission"},{"request_id","report-1"},
+        {"source",{{"mode","runtime_snapshot"},{"expected_snapshot_hash",source_hash},
+            {"expected_frame_origin","system_barycenter"},
+            {"expected_frame_axes","principia_alicesun_frozen_at_capture"},{"expected_state_epoch_ut_s",0.0}}},
+        {"ephemeris",{{"end_ut_s",6000000.0},{"step_s",6000000.0},
+            {"max_position_fit_error_m",1.0},{"max_velocity_fit_error_mps",0.01}}},
+        {"mission",original["mission"]}};
+    request["mission"]["legs"]=request["mission"]["flight_grids"];
+    request["mission"].erase("flight_grids");
+    request["mission"].erase("stay_type");
+    json terminal={{"protocol_version",1},{"request_id","report-1"},{"type","complete"},
+        {"snapshot_hash",source_hash},{"source_confidence","runtime_observed_uncompared"},
+        {"sampled_cells",3},{"total_cells",3},{"ranked_routes",json::array()},
+        {"ephemeris_metadata",original["ephemeris"]}};
+    terminal["ephemeris_metadata"]["start_ut_s"]=0.0;
+    auto composed=compose_runtime_study_report(runtime_bytes,source_hash,request,terminal);
+    check(composed["source"]["snapshot_hash"]==source_hash&&
+        composed["calendar"]["month_lengths"]==runtime_source["calendar"]["month_lengths"],
+        "composer preserves exact runtime source and calendar");
+    check(composed["result"]["ranked_routes"].empty(),"composer preserves empty result");
+    auto terminal_route=original["result"]["ranked_routes"][0];
+    terminal_route["snapshot_hash"]=source_hash;
+    terminal_route["source_confidence"]="runtime_observed_uncompared";
+    terminal_route["route_id"]=source_hash+":0:1:2";
+    terminal_route["rank"]=1;
+    terminal_route["home_mars"]=terminal_route["legs"][0];
+    terminal_route["mars_venus"]=terminal_route["legs"][1];
+    terminal_route["venus_home"]=terminal_route["legs"][2];
+    terminal_route["venus_periapsis_margin_m"]=terminal_route["flyby_periapsis_margin_m"];
+    terminal_route.erase("legs");terminal_route.erase("flyby_periapsis_margin_m");
+    terminal["ranked_routes"].push_back(terminal_route);
+    composed=compose_runtime_study_report(runtime_bytes,source_hash,request,terminal);
+    check(composed["result"]["ranked_routes"][0]["legs"].size()==3&&
+        composed["result"]["ranked_routes"][0]["flyby_periapsis_margin_m"]==1000.0,
+        "composer converts worker route");
+    rejects([&]{compose_runtime_study_report(runtime_bytes,std::string(64,'0'),request,terminal);},"source");
+    auto changed=terminal;changed["request_id"]="other";
+    rejects([&]{compose_runtime_study_report(runtime_bytes,source_hash,request,changed);},"request_id");
 }
 }
 int main(){try{cases();std::cout<<"PASS "<<checks<<" report checks\n";}

@@ -250,7 +250,11 @@ bool WorkerClient::start(ClientOptions options){
     if(thread_.joinable())thread_.join();
     {std::lock_guard lock(queue_mutex_);queue_.clear();}
     shutdown_.store(false);cancel_requested_.store(false);active_.store(true);
-    thread_=std::thread([this,options=std::move(options)]() mutable {run(std::move(options));});return true;
+    thread_=std::thread([this,options=std::move(options)]() mutable {
+        run(std::move(options));
+        // Keep running() true until run's child handles and watchdogs have been destroyed.
+        active_.store(false);
+    });return true;
 }
 void WorkerClient::cancel() noexcept {cancel_requested_.store(true);}
 bool WorkerClient::wait_for(std::chrono::milliseconds duration){
@@ -275,7 +279,7 @@ void WorkerClient::run(ClientOptions options) noexcept {
 #endif
         Child child;
         if(options.executable_path.empty()||!child.launch(options.executable_path,options.arguments)){
-            failure("spawn_failed","worker executable missing or could not start",cap);active_.store(false);return;}
+            failure("spawn_failed","worker executable missing or could not start",cap);return;}
         const auto begun=std::chrono::steady_clock::now();
         std::atomic<int> write_stop_reason{0}; // 1 owner close, 2 cancel, 3 deadline
         std::jthread write_watchdog([&](std::stop_token stop){
@@ -290,11 +294,11 @@ void WorkerClient::run(ClientOptions options) noexcept {
         });
         const bool written=options.request_line.size()<=line_limit&&child.write_line(options.request_line);
         write_watchdog.request_stop();write_watchdog.join();
-        if(write_stop_reason.load()==1){active_.store(false);return;}
-        if(write_stop_reason.load()==2){failure("cancelled","request write cancelled before worker accepted it",cap);active_.store(false);return;}
-        if(write_stop_reason.load()==3){failure("timeout","request write exceeded deadline",cap);active_.store(false);return;}
+        if(write_stop_reason.load()==1)return;
+        if(write_stop_reason.load()==2){failure("cancelled","request write cancelled before worker accepted it",cap);return;}
+        if(write_stop_reason.load()==3){failure("timeout","request write exceeded deadline",cap);return;}
         if(!written){
-            failure("request_write_failed","worker request could not be written",cap);active_.store(false);return;}
+            failure("request_write_failed","worker request could not be written",cap);return;}
         WorkerEventValidator validator(options.request_id,options.expected_snapshot_hash,options.expected_source_confidence,
                                        options.max_candidates,options.result_kind);
         std::string partial;
@@ -315,10 +319,10 @@ void WorkerClient::run(ClientOptions options) noexcept {
                 if(!partial.empty())throw WorkerClientError("unterminated event JSON line");
                 if(exit_code!=0)failure("nonzero_exit","worker exit status "+std::to_string(exit_code)+"; stderr: "+stderr_text,cap);
                 else if(!validator.terminal())failure("premature_eof","worker ended before terminal event; stderr: "+stderr_text,cap);
-                active_.store(false);return;
+                return;
             }
             const auto now=std::chrono::steady_clock::now();
-            if(shutdown_.load()){child.terminate();active_.store(false);return;}
+            if(shutdown_.load()){child.terminate();return;}
             if(cancel_requested_.load()&&!cancel_sent){
                 const json control={{"protocol_version",1},{"command","cancel"},{"request_id",options.request_id}};
                 std::atomic<bool> control_timed_out{false};
@@ -333,21 +337,20 @@ void WorkerClient::run(ClientOptions options) noexcept {
                 });
                 const bool control_written=child.write_line(control.dump());
                 cancel_watchdog.request_stop();cancel_watchdog.join();
-                if(shutdown_.load()){active_.store(false);return;}
+                if(shutdown_.load())return;
                 if(control_timed_out.load()){
                     failure("cancel_timeout","worker did not accept cancellation before deadline",cap);
-                    active_.store(false);return;}
+                    return;}
                 if(!control_written){failure("cancel_write_failed","worker cancellation control could not be written",cap);
-                    active_.store(false);return;}
+                    return;}
                 cancel_sent=true;cancel_at=now;
             }
             if(cancel_sent&&now-cancel_at>options.cancel_grace){
-                child.terminate();failure("cancel_timeout","worker ignored cancellation; stderr: "+stderr_text,cap);active_.store(false);return;}
-            if(now-begun>options.timeout){child.terminate();failure("timeout","worker exceeded deadline; stderr: "+stderr_text,cap);active_.store(false);return;}
+                child.terminate();failure("cancel_timeout","worker ignored cancellation; stderr: "+stderr_text,cap);return;}
+            if(now-begun>options.timeout){child.terminate();failure("timeout","worker exceeded deadline; stderr: "+stderr_text,cap);return;}
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }catch(const WorkerClientError& error){failure("invalid_event",std::string(error.what())+"; stderr: "+stderr_text,cap);}
     catch(const std::exception& error){failure("io_failed",std::string(error.what())+"; stderr: "+stderr_text,cap);}
-    active_.store(false);
 }
 }

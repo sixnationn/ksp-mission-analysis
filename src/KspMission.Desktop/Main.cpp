@@ -1,5 +1,7 @@
 #include "Ephemeris.hpp"
 #include "RuntimeReader.hpp"
+#include "WorkerClient.hpp"
+#include "StudyReport.hpp"
 #include <epoxy/gl.h>
 #include <glibmm/ustring.h>
 #include <sigc++/sigc++.h>
@@ -23,23 +25,30 @@
 #include <gtkmm/entry.h>
 #include <gtkmm/label.h>
 #include <gtkmm/progressbar.h>
+#include <glibmm/main.h>
 #include <gtkmm/scrolledwindow.h>
 #include <gtkmm/stylecontext.h>
 #include <gdkmm/display.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <map>
+#include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
 using namespace ksp;
 namespace {
+using json=nlohmann::json;
 constexpr double pi=3.14159265358979323846;
 std::string fixed(double value,int digits=2){std::ostringstream out;out<<std::fixed<<std::setprecision(digits)<<value;return out.str();}
 std::string scientific(double value){std::ostringstream out;out<<std::scientific<<std::setprecision(3)<<value;return out.str();}
@@ -212,12 +221,14 @@ private:
 };
 class DesktopWindow final:public Gtk::ApplicationWindow {
 public:
-    DesktopWindow(Snapshot snapshot,Ephemeris ephemeris,std::string import_path,std::string expected_hash,std::string command_error):snapshot_(std::move(snapshot)),ephemeris_(std::move(ephemeris)),
+    DesktopWindow(Snapshot snapshot,Ephemeris ephemeris,std::string import_path,std::string expected_hash,
+                  std::string worker_path,std::string command_error):snapshot_(std::move(snapshot)),ephemeris_(std::move(ephemeris)),
         view_(snapshot_,ephemeris_,[this](std::size_t index){select(index);},[this](const std::string& error){status_.set_text(error);}),
         root_(Gtk::Orientation::VERTICAL,0),main_(Gtk::Orientation::HORIZONTAL,0),left_(Gtk::Orientation::VERTICAL,10),
         right_(Gtk::Orientation::VERTICAL,10),center_(Gtk::Orientation::VERTICAL,0),bottom_(Gtk::Orientation::VERTICAL,8),
         selection_("Selected: Haven"),status_("Synthetic visualization ready · camera changes do not affect the trajectory"),
-        import_("Import runtime JSON"),search_("Search unavailable"),export_("Export unavailable"){
+        import_("Import runtime JSON"),search_("Screen runtime mission"),cancel_("Cancel worker"),export_("Save study report"),
+        worker_path_(std::move(worker_path)){
         set_title("KSP Mission Analysis · Synthetic study");set_default_size(1440,880);
         install_css();set_child(root_);
         auto* top=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,4);top->add_css_class("topbar");
@@ -229,6 +240,8 @@ public:
         build_left();build_center();build_right();build_bottom();root_.append(bottom_);
         path_.set_text(import_path);hash_.set_text(expected_hash);
         refresh_source();select(snapshot_.bodies.size()>1?1:0);
+        poll_connection_=Glib::signal_timeout().connect(sigc::mem_fun(*this,&DesktopWindow::poll_worker),100);
+        signal_close_request().connect(sigc::mem_fun(*this,&DesktopWindow::close_request),false);
         if(!command_error.empty())show_import_error(command_error);
         else if(!import_path.empty()||!expected_hash.empty())import_runtime();
     }
@@ -236,8 +249,18 @@ private:
     Snapshot snapshot_;Ephemeris ephemeris_;OrbitView view_;
     Gtk::Box root_,main_,left_,right_,center_,bottom_;
     Gtk::Box body_rows_{Gtk::Orientation::VERTICAL,7},fields_{Gtk::Orientation::VERTICAL,1};
-    Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_;
-    Gtk::Entry path_,hash_;Gtk::Button import_,search_,export_;
+    Gtk::Box form_{Gtk::Orientation::VERTICAL,5},route_rows_{Gtk::Orientation::VERTICAL,4};
+    Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_,worker_status_;
+    Gtk::Entry path_,hash_;Gtk::Button import_,search_,cancel_,export_;
+    Gtk::ProgressBar progress_;
+    std::map<std::string,Gtk::Entry*> inputs_;
+    WorkerClient worker_;
+    sigc::connection poll_connection_;
+    std::optional<RuntimeLoad> runtime_source_;
+    std::optional<json> submitted_request_,terminal_event_;
+    std::string worker_path_,loaded_path_,loaded_hash_,request_id_;
+    std::size_t request_sequence_=0;
+    bool pending_close_=false,terminal_seen_=false;
     std::string source_details_="Synthetic M2 fixture · no KSP or Principia runtime import";
     bool runtime_loaded_=false;
     void show_import_error(const std::string& detail){
@@ -246,6 +269,7 @@ private:
     }
     void import_runtime(){
         try{
+            if(worker_.running())throw std::runtime_error("Cancel the active worker before importing another source");
             const auto filename=path_.get_text();const auto expected=hash_.get_text();
             auto prepared=prepare_runtime(filename,expected);
             auto& loaded=prepared.load;
@@ -254,10 +278,21 @@ private:
                 "\nNo-leap display: "+format_no_leap_ut(loaded,loaded.capture_ut_s)+
                 " · day "+fixed(loaded.display_day_duration_s,0)+" SI s · origin UT "+fixed(loaded.display_origin_ut_s,0)+" s"+
                 "\nPrincipia state source · observed, not compared to installed game";
-            snapshot_=std::move(loaded.snapshot);ephemeris_=std::move(prepared.preview);
+            runtime_source_=loaded;snapshot_=loaded.snapshot;ephemeris_=std::move(prepared.preview);
+            loaded_path_=filename;loaded_hash_=expected;
+            submitted_request_.reset();terminal_event_.reset();export_.set_sensitive(false);
             source_details_=details;runtime_loaded_=true;view_.reload();refresh_source();select(snapshot_.bodies.size()>1?1:0);
+            for(const auto& key:{"central","home","mars","venus","leg1_min","leg1_max","leg2_min","leg2_max",
+                "leg3_min","leg3_max","ephemeris_end","home_parking","mars_parking","home_capture",
+                "venus_max_periapsis","venus_speed_tolerance","max_duration"})inputs_.at(key)->set_text("");
+            inputs_.at("launch_start")->set_text(fixed(loaded.capture_ut_s,0));
+            inputs_.at("launch_end")->set_text(fixed(loaded.capture_ut_s,0));
+            search_.set_sensitive(true);cancel_.set_sensitive(false);progress_.set_fraction(0);
+            while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+            route_rows_.append(*label("No ranked screened routes for this source.","small"));
+            worker_status_.set_text("Runtime snapshot ready · configure exact roles and SI grids to screen");
             import_status_.set_text("Runtime JSON accepted · exact-byte SHA-256 checked · independent Newtonian preview");
-            status_.set_text("Runtime scene loaded from "+filename+" · search/export unavailable");
+            status_.set_text("Runtime scene loaded from "+filename+" · screened search available");
             set_title("KSP Mission Analysis · Runtime capture (uncompared)");
         }catch(const std::exception& error){show_import_error(error.what());}
     }
@@ -291,12 +326,12 @@ private:
         append_field(fields_,"MARS ROLE",runtime_loaded_?suggested_role("JNSQDuna"):synthetic_role(2));
         append_field(fields_,"VENUS ROLE",runtime_loaded_?suggested_role("JNSQEve"):synthetic_role(3));
         append_field(fields_,"CENTRAL BODY",runtime_loaded_?suggested_role("JNSQSun"):synthetic_role(0));
-        append_field(fields_,"LAUNCH WINDOW","UT "+fixed(ephemeris_.metadata.start_ut_s,0)+"–"+fixed(ephemeris_.metadata.end_ut_s,0)+" s · preview only");
-        append_field(fields_,"FLIGHT TIME","Not configured · SI seconds");
+        append_field(fields_,"LAUNCH WINDOW","Edit exact UT grid below");
+        append_field(fields_,"FLIGHT TIME","Edit three SI-second grids below");
         append_field(fields_,"PARKING STAY","5,184,000 SI seconds fixed");
-        append_field(fields_,"PARKING / CAPTURE ALTITUDE","Not configured · metres");
-        append_field(fields_,"FLYBY CLEARANCE","Not configured · metres above surface + atmosphere");
-        append_field(fields_,"RETURN CONDITION","Home rendezvous · not configured");
+        append_field(fields_,"PARKING / CAPTURE ALTITUDE","Editable metres below");
+        append_field(fields_,"FLYBY CLEARANCE","Editable safety above source atmosphere below");
+        append_field(fields_,"RETURN CONDITION","Home parking-orbit capture only");
     }
     void install_css(){
         auto provider=Gtk::CssProvider::create();provider->load_from_data(R"CSS(
@@ -342,19 +377,236 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         controls->set_margin(10);center_.append(*controls);
     }
     void build_right(){
-        right_.add_css_class("side");right_.add_css_class("right-side");right_.set_size_request(315,-1);main_.append(right_);
+        right_.add_css_class("side");right_.add_css_class("right-side");right_.set_size_request(355,-1);main_.append(right_);
         right_.append(*label("Mission setup","section"));
         auto* scroll=Gtk::make_managed<Gtk::ScrolledWindow>();scroll->set_vexpand(true);right_.append(*scroll);
-        scroll->set_child(fields_);
-        right_.append(*label("Worker integration and mission validation are required before search.","small"));
-        search_.set_sensitive(false);export_.set_sensitive(false);search_.add_css_class("disabled-action");export_.add_css_class("disabled-action");
-        right_.append(search_);right_.append(export_);
+        auto* contents=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,12);
+        contents->append(fields_);contents->append(form_);scroll->set_child(*contents);
+        build_mission_form();
+        right_.append(*label("Screened patched-conic routes only · independent Newtonian ephemeris · SI / UT","small"));
+        search_.set_sensitive(false);export_.set_sensitive(false);
+        cancel_.set_sensitive(false);
+        search_.signal_clicked().connect([this]{start_mission();});
+        cancel_.signal_clicked().connect([this]{worker_.cancel();worker_status_.set_text("Cancellation requested · waiting for worker checkpoint");});
+        export_.signal_clicked().connect([this]{save_report();});
+        right_.append(search_);right_.append(cancel_);right_.append(export_);
     }
     void build_bottom(){
         bottom_.add_css_class("bottom");bottom_.append(*label("CANDIDATES & WORKER","eyebrow"));
-        bottom_.append(*label("No screened seeds or refined routes. Worker integration is not available in this window.","small"));
-        auto* bar=Gtk::make_managed<Gtk::ProgressBar>();bar->set_fraction(0);bottom_.append(*bar);
+        auto* routes=Gtk::make_managed<Gtk::ScrolledWindow>();routes->set_size_request(-1,110);routes->set_child(route_rows_);
+        bottom_.append(*routes);route_rows_.append(*label("No ranked screened routes.","small"));
+        progress_.set_fraction(0);bottom_.append(progress_);
+        worker_status_.set_xalign(0);worker_status_.set_wrap(true);worker_status_.add_css_class("small");
+        worker_status_.set_text("Worker idle · runtime snapshot required");bottom_.append(worker_status_);
         status_.set_xalign(0);status_.add_css_class("small");bottom_.append(status_);
+    }
+    void add_input(const std::string& key,const std::string& title,const std::string& value=""){
+        auto* row=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,2);row->add_css_class("field");
+        row->append(*label(title,"field-name"));
+        auto* entry=Gtk::make_managed<Gtk::Entry>();entry->set_text(value);row->append(*entry);
+        form_.append(*row);inputs_.emplace(key,entry);
+    }
+    void build_mission_form(){
+        form_.append(*label("Runtime mission request · edit exact IDs and SI values","section"));
+        add_input("central","Central body ID");add_input("home","Home body ID");
+        add_input("mars","Mars-role body ID");add_input("venus","Venus-role body ID");
+        add_input("launch_start","Launch start UT (s)");add_input("launch_end","Launch end UT (s)");
+        add_input("launch_step","Launch step (s)","86400");
+        for(int i=1;i<=3;++i){const auto prefix="leg"+std::to_string(i);
+            add_input(prefix+"_min","Leg "+std::to_string(i)+" flight minimum (s)");
+            add_input(prefix+"_max","Leg "+std::to_string(i)+" flight maximum (s)");
+            add_input(prefix+"_step","Leg "+std::to_string(i)+" flight step (s)","86400");
+            add_input(prefix+"_branch","Leg "+std::to_string(i)+" Lambert branch: short / long","short");
+            add_input(prefix+"_direction","Leg "+std::to_string(i)+" direction: positive / negative","positive");}
+        add_input("home_parking","Home parking altitude (m)");
+        add_input("mars_parking","Mars parking altitude (m)");
+        add_input("home_capture","Home return capture altitude (m)");
+        add_input("venus_safety","Venus flyby safety above atmosphere (m)","0");
+        add_input("venus_max_periapsis","Venus maximum periapsis radius (m)");
+        add_input("venus_speed_tolerance","Flyby speed matching tolerance (m/s)");
+        add_input("max_duration","Maximum total duration (s)");
+        add_input("lambert_position","Lambert position residual limit (m)","1000");
+        add_input("lambert_velocity","Lambert velocity residual limit (m/s)","0.01");
+        add_input("central_safety","Central body safety above atmosphere (m)","0");
+        add_input("ephemeris_end","Independent ephemeris end UT (s)");
+        add_input("ephemeris_step","Ephemeris fixed step (s)","3600");
+        add_input("fit_position","Maximum position fit error (m)","1000");
+        add_input("fit_velocity","Maximum velocity fit error (m/s)","1");
+        add_input("max_cells","Prospective Lambert cell cap (≤100000)","100000");
+        add_input("max_routes","Retained route cap (≤128)","50");
+        add_input("timeout","Worker deadline (s)","300");
+        add_input("report_path","Study report output path (JSON)");
+        form_.append(*label("Parking-orbit stay: exactly 5,184,000 SI s · return: parking capture","small"));
+    }
+    std::string field(const std::string& name) const{return inputs_.at(name)->get_text().raw();}
+    double number(const std::string& name) const{
+        const auto raw=field(name);std::size_t used=0;double value=0;
+        try{value=std::stod(raw,&used);}catch(const std::exception&){throw std::runtime_error(name+" needs a finite SI number");}
+        if(used!=raw.size()||!std::isfinite(value))throw std::runtime_error(name+" needs a finite SI number");
+        return value;
+    }
+    std::size_t positive_integer(const std::string& name,std::size_t maximum) const{
+        const auto raw=field(name);if(raw.empty()||raw.find_first_not_of("0123456789")!=std::string::npos)
+            throw std::runtime_error(name+" needs a positive integer");
+        std::size_t used=0;unsigned long long value=0;
+        try{value=std::stoull(raw,&used);}catch(const std::exception&){throw std::runtime_error(name+" integer invalid");}
+        if(used!=raw.size()||value==0||value>maximum)throw std::runtime_error(name+" exceeds its cap");
+        return static_cast<std::size_t>(value);
+    }
+    static std::size_t grid_count(double first,double last,double step,const std::string& name){
+        if(!std::isfinite(first)||!std::isfinite(last)||!std::isfinite(step)||step<=0||last<first)
+            throw std::runtime_error(name+" range or step invalid");
+        const double intervals=(last-first)/step;
+        if(!std::isfinite(intervals)||intervals>100000||std::abs(intervals-std::round(intervals))>1e-9)
+            throw std::runtime_error(name+" must contain integer steps within cap");
+        return static_cast<std::size_t>(std::llround(intervals))+1;
+    }
+    json mission_request(){
+        if(!runtime_loaded_||!runtime_source_)throw std::runtime_error("Import a verified runtime snapshot first");
+        if(path_.get_text().raw()!=loaded_path_||hash_.get_text().raw()!=loaded_hash_)
+            throw std::runtime_error("Source path or hash changed; import the snapshot again");
+        const std::array<std::string,4> roles{field("central"),field("home"),field("mars"),field("venus")};
+        for(std::size_t i=0;i<roles.size();++i){
+            if(roles[i].empty()||std::none_of(snapshot_.bodies.begin(),snapshot_.bodies.end(),
+                [&](const Body& body){return body.id==roles[i];}))throw std::runtime_error("Role ID missing from loaded snapshot: "+roles[i]);
+            for(std::size_t j=0;j<i;++j)if(roles[i]==roles[j])throw std::runtime_error("Body roles must have distinct IDs");
+        }
+        const double launch_start=number("launch_start"),launch_end=number("launch_end"),launch_step=number("launch_step");
+        const auto launches=grid_count(launch_start,launch_end,launch_step,"launch");
+        const auto max_cells=positive_integer("max_cells",100000),max_routes=positive_integer("max_routes",128);
+        json legs=json::array();std::size_t product=launches,total=0;double latest_return=launch_end+5184000;
+        for(int i=1;i<=3;++i){const auto prefix="leg"+std::to_string(i);
+            const double minimum=number(prefix+"_min"),maximum=number(prefix+"_max"),step=number(prefix+"_step");
+            if(minimum<=0)throw std::runtime_error(prefix+" flight time must be positive");
+            const auto count=grid_count(minimum,maximum,step,prefix);
+            if(product>max_cells/count)throw std::runtime_error("Mission work cap exceeded");
+            product*=count;if(total>max_cells-product)throw std::runtime_error("Mission work cap exceeded");total+=product;
+            latest_return+=maximum;
+            const auto branch=field(prefix+"_branch"),direction=field(prefix+"_direction");
+            if((branch!="short"&&branch!="long")||(direction!="positive"&&direction!="negative"))
+                throw std::runtime_error(prefix+" branch or direction invalid");
+            legs.push_back({{"min_s",minimum},{"max_s",maximum},{"step_s",step},
+                {"branch",branch},{"direction",direction}});
+        }
+        const double end=number("ephemeris_end"),ephemeris_step=number("ephemeris_step");
+        const double epoch=*snapshot_.state_epoch_ut_s;
+        if(launch_start<epoch||end<latest_return||end<=epoch||grid_count(epoch,end,ephemeris_step,"ephemeris")>100001)
+            throw std::runtime_error("Independent ephemeris coverage or step cap invalid");
+        if(number("fit_position")<=0||number("fit_velocity")<=0||number("lambert_position")<=0||number("lambert_velocity")<=0)
+            throw std::runtime_error("Fit and Lambert residual limits must be positive");
+        if(number("max_duration")<=0||number("venus_max_periapsis")<=0||number("venus_speed_tolerance")<0||
+           number("venus_safety")<0||number("central_safety")<0)
+            throw std::runtime_error("Duration and flyby constraints invalid");
+        const auto timeout=positive_integer("timeout",1800);(void)timeout;
+        const json mission={{"central_body_id",roles[0]},{"home_body_id",roles[1]},
+            {"mars_body_id",roles[2]},{"venus_body_id",roles[3]},
+            {"reference_normal",json::array({0,0,1})},{"launch_start_ut_s",launch_start},
+            {"launch_end_ut_s",launch_end},{"launch_step_s",launch_step},{"legs",legs},
+            {"fixed_stay_s",5184000.0},{"time_tolerance_s",0.0},{"max_total_duration_s",number("max_duration")},
+            {"home_parking_altitude_m",number("home_parking")},{"mars_parking_altitude_m",number("mars_parking")},
+            {"return_capture_altitude_m",number("home_capture")},{"venus_safety_margin_m",number("venus_safety")},
+            {"venus_maximum_periapsis_m",number("venus_max_periapsis")},
+            {"venus_speed_tolerance_mps",number("venus_speed_tolerance")},
+            {"max_lambert_position_residual_m",number("lambert_position")},
+            {"max_lambert_velocity_residual_mps",number("lambert_velocity")},
+            {"central_safety_margin_m",number("central_safety")},{"max_cells",max_cells},{"max_routes",max_routes},
+            {"return_condition","parking_capture"}};
+        return {{"protocol_version",1},{"command","start_mission"},{"request_id",request_id_},
+            {"source",{{"mode","runtime_snapshot"},{"path",loaded_path_},{"expected_snapshot_hash",loaded_hash_},
+                {"expected_frame_origin",snapshot_.frame.origin},{"expected_frame_axes",snapshot_.frame.axes},
+                {"expected_state_epoch_ut_s",epoch}}},
+            {"ephemeris",{{"end_ut_s",end},{"step_s",ephemeris_step},
+                {"max_position_fit_error_m",number("fit_position")},
+                {"max_velocity_fit_error_mps",number("fit_velocity")}}},{"mission",mission}};
+    }
+    void start_mission(){
+        try{
+            if(worker_.running())throw std::runtime_error("Worker is already running");
+            request_id_="desktop-mission-"+std::to_string(++request_sequence_);
+            auto request=mission_request();ClientOptions options;
+            options.executable_path=worker_path_;options.request_line=request.dump();options.request_id=request_id_;
+            options.expected_snapshot_hash=loaded_hash_;options.expected_source_confidence="runtime_observed_uncompared";
+            options.result_kind=WorkerResultKind::screened_route;
+            options.max_candidates=positive_integer("max_routes",128);options.max_retained_events=2048;
+            options.timeout=std::chrono::seconds(positive_integer("timeout",1800));
+            options.cancel_grace=std::chrono::milliseconds(750);
+            if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
+            submitted_request_=request;terminal_event_.reset();export_.set_sensitive(false);
+            terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);cancel_.set_sensitive(true);
+            import_.set_sensitive(false);worker_status_.set_text("Worker starting · "+request_id_);
+            while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+            route_rows_.append(*label("Screening runtime mission · no final routes yet","small"));
+        }catch(const std::exception& error){worker_status_.set_text(std::string("Mission request rejected: ")+error.what());}
+    }
+    void show_ranked(const json& event){
+        while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+        const auto& rows=event.at("ranked_routes");
+        if(rows.empty()){route_rows_.append(*label("No screened route satisfies this bounded request.","small"));return;}
+        for(const auto& row:rows){
+            const auto leg_dates=[&](const char* key){const auto& leg=row.at(key);
+                return fixed(leg.at("departure_ut_s").get<double>(),0)+"→"+
+                    fixed(leg.at("arrival_ut_s").get<double>(),0);};
+            const auto text="#"+std::to_string(row.at("rank").get<int>())+"  "+
+                fixed(row.at("total_optimistic_delta_v_mps").get<double>(),2)+" m/s optimistic  ·  UT "+
+                fixed(row.at("launch_ut_s").get<double>(),0)+" → "+fixed(row.at("return_ut_s").get<double>(),0)+
+                " s  ·  Venus periapsis margin "+fixed(row.at("venus_periapsis_margin_m").get<double>(),1)+
+                " m\nLeg UT: H→M "+leg_dates("home_mars")+" · M→V "+leg_dates("mars_venus")+
+                " · V→H "+leg_dates("venus_home")+
+                "\nBurns m/s: injection "+fixed(row.at("home_injection_mps").get<double>(),2)+
+                " · Mars capture "+fixed(row.at("mars_capture_mps").get<double>(),2)+
+                " · Mars departure "+fixed(row.at("mars_departure_mps").get<double>(),2)+
+                " · home capture "+fixed(row.at("home_return_capture_mps").get<double>(),2)+
+                "\n"+row.at("result_label").get<std::string>()+"  ·  "+row.at("route_id").get<std::string>();
+            route_rows_.append(*label(text,"small"));
+        }
+    }
+    void save_report(){
+        try{
+            if(!submitted_request_||!terminal_event_||worker_.running())
+                throw std::runtime_error("Wait for a completed runtime mission worker result");
+            const auto destination=field("report_path");
+            if(destination.empty())throw std::runtime_error("Enter a study report output path");
+            std::ifstream file(loaded_path_,std::ios::binary|std::ios::ate);
+            if(!file)throw std::runtime_error("Runtime source cannot be reopened");
+            const auto length=file.tellg();
+            if(length<0||length>16*1024*1024)throw std::runtime_error("Runtime source size invalid");
+            std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+            if(!file.read(bytes.data(),length))throw std::runtime_error("Runtime source read incomplete");
+            const auto report=compose_runtime_study_report(bytes,loaded_hash_,*submitted_request_,*terminal_event_);
+            save_study_report(report,std::filesystem::path(destination));
+            worker_status_.set_text("Saved historical screened study · "+destination);
+        }catch(const std::exception& error){worker_status_.set_text(std::string("Study report rejected: ")+error.what());}
+    }
+    bool poll_worker(){
+        for(const auto& event:worker_.drain()){
+            const auto type=event.value("type",std::string{});
+            if(type=="started")worker_status_.set_text("Worker started · "+event.value("source_mode",std::string{})+
+                " · independent "+event.value("force_model",std::string{})+" · SI / UT");
+            else if(type=="progress"){
+                const auto sampled=event.value("sampled_cells",std::size_t{0}),total=event.value("total_cells",std::size_t{1});
+                progress_.set_fraction(total?static_cast<double>(sampled)/total:0);
+                worker_status_.set_text("Screening "+std::to_string(sampled)+" / "+std::to_string(total)+
+                    " Lambert cells · "+event.value("phase",std::string("route_screen")));
+            }else if(type=="route")worker_status_.set_text("Provisional screened route received · final ranking pending");
+            else if(type=="complete"||type=="cancelled"){
+                terminal_seen_=true;show_ranked(event);cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
+                terminal_event_=event;export_.set_sensitive(event.contains("ephemeris_metadata"));
+                import_.set_sensitive(true);worker_status_.set_text(type=="cancelled"?
+                    "Cancelled · accepted partial screened routes shown":"Completed · final ranked screened routes shown");
+            }else if(type=="error"||type=="client_error"){
+                terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
+                terminal_event_.reset();export_.set_sensitive(false);
+                worker_status_.set_text("Worker error "+event.value("code",std::string("unknown"))+": "+
+                    event.value("detail",std::string("no detail")));
+            }
+        }
+        if(pending_close_&&!worker_.running()){pending_close_=false;close();}
+        return true;
+    }
+    bool close_request(){
+        if(worker_.running()){pending_close_=true;worker_.cancel();
+            worker_status_.set_text("Closing after worker cancellation and reap");return true;}
+        poll_connection_.disconnect();return false;
     }
     void select(std::size_t index){
         view_.select(index);const auto& b=snapshot_.bodies[index];
@@ -375,13 +627,21 @@ public:
 };
 }
 int main(int argc,char** argv){
-    std::string path,hash,command_error;bool validate_only=false;
+    std::string path,hash,worker_path,command_error;bool validate_only=false;
     for(int i=1;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--snapshot"&&i+1<argc)path=argv[++i];
         else if(option=="--sha256"&&i+1<argc)hash=argv[++i];
+        else if(option=="--worker"&&i+1<argc)worker_path=argv[++i];
         else if(option=="--validate-snapshot")validate_only=true;
         else {command_error="Unknown or incomplete option: "+option;break;}
+    }
+    if(worker_path.empty()){
+        auto sibling=std::filesystem::absolute(argv[0]).parent_path()/"ksp_worker";
+#ifdef _WIN32
+        sibling.replace_extension(".exe");
+#endif
+        worker_path=sibling.string();
     }
     if(validate_only){
         try{
@@ -396,7 +656,7 @@ int main(int argc,char** argv){
     auto app=Gtk::Application::create("org.kspmission.desktop");
     try{
         auto snapshot=synthetic_snapshot();auto ephemeris=synthetic_ephemeris(snapshot);
-        return app->make_window_and_run<DesktopWindow>(1,argv,std::move(snapshot),std::move(ephemeris),path,hash,command_error);
+        return app->make_window_and_run<DesktopWindow>(1,argv,std::move(snapshot),std::move(ephemeris),path,hash,worker_path,command_error);
     }catch(const std::exception& error){
         g_printerr("KSP Mission synthetic desktop failed: %s\n",error.what());
         return app->make_window_and_run<ErrorWindow>(argc,argv,std::string(error.what()));
