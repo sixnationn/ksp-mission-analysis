@@ -1,0 +1,7 @@
+# M6 bounded search checkpoint
+
+The new `MissionSearch` library enumerates a capped launch/three-flight grid, screens each leg against one provenance-matched independent Newtonian ephemeris, joins exact encounter dates and the 5,184,000 SI-second parking stay, and sends each complete triplet to the reviewed patched-conic route assembler. It retains only the best K accepted routes with deterministic identities and returns explicit partial status on cancellation. The result remains `patched_conic_screened_route`.
+
+Tests were observed failing at the missing header before implementation. A controlled four-body synthetic fixture passes 31 focused checks: known optimistic four-burn total **58,181.2460942699 m/s**, repeatable ranking, two distinct launch-date identities, bounded top K, cancellation, work/coverage/source/role/atmosphere/stay/altitude failures, and a rejected flyby. Sol High review found rejected assembled routes were counted as failed Lambert cells; separate counters and a regression check fixed that issue. The complete Windows UCRT64 suite passed 10/10 CTest targets on 22 September 2026.
+
+The stationary synthetic fixture establishes search composition and accounting, not a physical JNSQ trajectory. The search has no worker command or GTK controls yet at this checkpoint. Full n-body multi-leg refinement, tighter independent repropagation, a real JNSQ Reborn Real flight snapshot, and installed KSP/Principia comparison remain open.
