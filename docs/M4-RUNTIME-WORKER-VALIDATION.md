@@ -6,4 +6,6 @@ Tests were written before implementation. A Sol High provenance review found a f
 
 A separate headless CLI smoke emitted started, progress and complete events for a runtime-shaped fixture and correctly reported `no_screened_seed` for its geometry. The test file is hand-built, not an installed-game export. Changes to the file after a successful read do not affect the in-memory search. A same-length concurrent rewrite or a change after the final file-size check is not detected, but the search still uses only the bytes whose SHA-256 was validated.
 
-Still open: testing a real exporter-produced flight snapshot, native Ubuntu CI for this new worker mode, stdin cancellation under a broad workload, multiple-leg runtime search and route refinement, GTK integration, and installed KSP/Principia comparison. These candidates remain `screened_seed` with independent Newtonian provenance, not runtime-verified solutions.
+[GitHub Actions run 35793104139](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35793104139) passed all six native Ubuntu 24.04 and Windows 2022 jobs with this worker mode, including GTK/worker builds and the CTest suite. This confirms cross-platform compile and tests, not a rendered UI or game comparison.
+
+Still open: testing a real exporter-produced flight snapshot, stdin cancellation under a broad workload, multiple-leg runtime search and route refinement, GTK integration, and installed KSP/Principia comparison. These candidates remain `screened_seed` with independent Newtonian provenance, not runtime-verified solutions.
