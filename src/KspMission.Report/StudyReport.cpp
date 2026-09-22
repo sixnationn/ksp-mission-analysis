@@ -113,6 +113,19 @@ void validate_study_report(const json& document){
         string(source,"exporter_id");string(source,"exporter_version");
         string(source,"game_version");string(source,"save_id");
         number(source,"capture_ut_s");
+        if(!source.contains("principia_loaded")||source.at("principia_loaded")!=true||
+           string(source,"state_source")!="principia_celestial_from_parent"||
+           string(source,"source_frame")!="Principia/AliceSun"||
+           string(source,"transform_method")!="parent_relative_sum_then_com_translation"||
+           string(source,"transform_version")!="1")
+            throw StudyReportError("runtime source frame or state provenance invalid");
+        const auto& mods=array(source,"mods");
+        std::set<std::string> mod_ids;
+        for(const auto& mod:mods){
+            const auto id=string(mod,"id");string(mod,"version");
+            if(!mod_ids.insert(id).second)throw StudyReportError("duplicate source mods id");
+        }
+        if(!mod_ids.contains("Principia"))throw StudyReportError("source mods missing Principia");
     }
     string(source,"frame_origin");string(source,"frame_axes");
     if(string(source,"frame_handedness")!="right"||!source.contains("frame_inertial")||
@@ -277,7 +290,14 @@ json compose_runtime_study_report(const std::string& runtime_json_bytes,
             {"source",{{"snapshot_hash",expected_sha256},{"confidence",loaded.snapshot.confidence},
                 {"exporter_id",loaded.exporter_id},{"exporter_version",loaded.exporter_version},
                 {"game_version",loaded.game_version},{"save_id",loaded.save_id},
-                {"capture_ut_s",loaded.capture_ut_s},{"frame_origin",loaded.snapshot.frame.origin},
+                {"capture_ut_s",loaded.capture_ut_s},
+                {"principia_loaded",raw.at("capture").at("principia_loaded")},
+                {"state_source",raw.at("capture").at("state_source")},
+                {"mods",raw.at("capture").at("mods")},
+                {"source_frame",raw.at("frame").at("source_frame")},
+                {"transform_method",raw.at("frame").at("transform_method")},
+                {"transform_version",raw.at("frame").at("transform_version")},
+                {"frame_origin",loaded.snapshot.frame.origin},
                 {"frame_axes",loaded.snapshot.frame.axes},{"frame_handedness",loaded.snapshot.frame.handedness},
                 {"frame_inertial",loaded.snapshot.frame.inertial},
                 {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s}}},

@@ -66,12 +66,21 @@ void cases(){
     runtime["source"]["game_version"]="1.12.5";
     runtime["source"]["save_id"]="synthetic-report-test";
     runtime["source"]["capture_ut_s"]=0.0;
+    runtime["source"]["principia_loaded"]=true;
+    runtime["source"]["state_source"]="principia_celestial_from_parent";
+    runtime["source"]["source_frame"]="Principia/AliceSun";
+    runtime["source"]["transform_method"]="parent_relative_sum_then_com_translation";
+    runtime["source"]["transform_version"]="1";
+    runtime["source"]["mods"]=json::array({{{"id","Principia"},{"version","test"}}});
     runtime["result"]["ranked_routes"][0]["snapshot_hash"]=runtime_hash;
     runtime["result"]["ranked_routes"][0]["source_confidence"]="runtime_observed_uncompared";
     runtime["result"]["ranked_routes"][0]["route_id"]=runtime_hash+":0:1:2";
     validate_study_report(runtime);++checks;
     runtime["source"].erase("game_version");
     rejects([&]{validate_study_report(runtime);},"game_version");
+    runtime["source"]["game_version"]="1.12.5";
+    runtime["source"].erase("mods");
+    rejects([&]{validate_study_report(runtime);},"mods");
     wrong=original;wrong["source"]["frame_handedness"]="left";rejects([&]{validate_study_report(wrong);},"frame");
     wrong=original;wrong["calendar"]["month_lengths"][1]=27;
     rejects([&]{validate_study_report(wrong);},"month_lengths");
@@ -139,7 +148,8 @@ void cases(){
     terminal["ephemeris_metadata"]["start_ut_s"]=0.0;
     auto composed=compose_runtime_study_report(runtime_bytes,source_hash,request,terminal);
     check(composed["source"]["snapshot_hash"]==source_hash&&
-        composed["calendar"]["month_lengths"]==runtime_source["calendar"]["month_lengths"],
+        composed["calendar"]["month_lengths"]==runtime_source["calendar"]["month_lengths"]&&
+        composed["source"]["mods"]==runtime_source["capture"]["mods"],
         "composer preserves exact runtime source and calendar");
     check(composed["result"]["ranked_routes"].empty(),"composer preserves empty result");
     auto terminal_route=original["result"]["ranked_routes"][0];
