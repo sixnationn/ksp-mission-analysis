@@ -1,0 +1,40 @@
+name: Build and check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  importer:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: ksp-importer-ubuntu
+            output: artifacts/m1/ubuntu-portable
+          - os: windows-2022
+            artifact: ksp-importer-windows
+            output: artifacts/m1/windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test and publish on Ubuntu
+        if: runner.os == 'Linux'
+        run: ./scripts/build-m1.sh
+      - name: Test and publish on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/Build-M1.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 7
