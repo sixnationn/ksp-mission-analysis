@@ -32,6 +32,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/Build-M1.ps1
+      - name: Validate runtime snapshot schema
+        run: dotnet run --configuration Release --project tests/KspMission.Snapshot.Tests/KspMission.Snapshot.Tests.csproj
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
@@ -53,3 +55,58 @@ jobs:
         run: cmake --build build/ci --config Release
       - name: Test C++ core
         run: ctest --test-dir build/ci -C Release --output-on-failure
+
+  desktop-ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install approved GTK build packages
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libgtkmm-4.0-dev libepoxy-dev libgl1-mesa-dev
+      - name: Configure GTK desktop and worker
+        run: cmake -S . -B build/desktop-ci -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build and check
+        run: |
+          cmake --build build/desktop-ci --target ksp_desktop ksp_worker
+          cmake --build build/desktop-ci
+          ctest --test-dir build/desktop-ci --output-on-failure
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ksp-desktop-ubuntu-build-check
+          path: |
+            build/desktop-ci/ksp_desktop
+            build/desktop-ci/ksp_worker
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtkmm-4.0
+            mingw-w64-ucrt-x86_64-libepoxy
+      - name: Configure GTK desktop and worker
+        shell: msys2 {0}
+        run: cmake -S . -B build/desktop-ci -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build and check
+        shell: msys2 {0}
+        run: |
+          cmake --build build/desktop-ci --target ksp_desktop ksp_worker
+          cmake --build build/desktop-ci
+          ctest --test-dir build/desktop-ci --output-on-failure
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ksp-desktop-windows-build-check
+          path: |
+            build/desktop-ci/ksp_desktop.exe
+            build/desktop-ci/ksp_worker.exe
+          if-no-files-found: error
+          retention-days: 7

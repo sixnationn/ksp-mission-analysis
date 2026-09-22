@@ -1,0 +1,9 @@
+# M4 search and worker validation checkpoint
+
+22 September 2026. This is a partial M4 checkpoint, not the full assist-search gate in `PLAN.md`.
+
+The Windows MSYS2 UCRT64 C++ build and all seven CTest targets passed. The focused executables reported 33 Lambert/flyby checks, 49 dated-grid checks, 18 terminal-position refinement checks and 40 JSON-line worker checks. The short and long Lambert tests measured endpoint position residuals of `5.28e-7 m` and `4.42e-6 m`; an independently integrated asymmetric endpoint differed by `6.32e-7 m`. A synthetic dated leg gave departure/arrival v-infinity magnitudes `775.56 / 1409.09 m/s`, with a `2184.65 m/s` screening score. These are velocity mismatches, not injection/capture burns.
+
+The single-impulse terminal-position test reached a `0.0677 m` final residual; a stricter spacecraft propagation using a half-step planetary ephemeris differed by `0.0225 m`. An independent fixed-primary RK4 comparison missed the analytic target by `0.0698 m`. The worker's separate synthetic fixture targeted an explicitly offset point and measured `0.0212 m` residual. Source hashes, frames, dates, SI units, approximation labels and failure statuses are explicit. The worker's final ranked top-K is deterministic and cancellation retains partial results at checkpoints.
+
+Still open: a full home → Mars-role capture → 5,184,000-second parking stay → Mars departure → Venus-role unpowered flyby → home return route; dated encounter velocity and capture constraints; multiple-shooting refinement; candidate diversity and objective accounting; independent planetary force-model comparison; KSP/Principia comparison. Core integration and one grid cell cannot be interrupted mid-call, so worker cancellation latency is bounded by those calls, not yet measured against a broad workload. No global optimum claim is made.

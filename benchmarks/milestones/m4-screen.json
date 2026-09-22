@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-22T21:59:35.7196092Z",
+  "generated_at_utc": "2026-09-22T21:25:35.3996290Z",
   "scope": "Registered task sessions only; active response is incomplete until next refresh.",
   "accounting": "Input includes cached input. Reasoning is a subset of output. Total is input plus output; do not add subsets again. Uncached input includes any cache-write input; cache writes are also reported separately.",
   "limitations": "Recorded runtime counters, not an invoice or weekly-limit estimate. Model attribution follows turn_context. No timing or quality claim follows from token counts alone.",
@@ -33,37 +33,37 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "high",
       "sessions": 3,
-      "input_tokens": 5838250,
-      "cached_input_tokens": 5536000,
+      "input_tokens": 4908127,
+      "cached_input_tokens": 4625024,
       "cache_write_input_tokens": 0,
-      "output_tokens": 38274,
-      "reasoning_output_tokens": 17078,
-      "total_tokens": 5876524,
-      "uncached_input_tokens": 302250
+      "output_tokens": 33303,
+      "reasoning_output_tokens": 14807,
+      "total_tokens": 4941430,
+      "uncached_input_tokens": 283103
     },
     {
       "model": "gpt-6-sol",
       "reasoning_effort": "medium",
       "sessions": 2,
-      "input_tokens": 31787584,
-      "cached_input_tokens": 31385856,
+      "input_tokens": 16229508,
+      "cached_input_tokens": 15972096,
       "cache_write_input_tokens": 0,
-      "output_tokens": 152536,
-      "reasoning_output_tokens": 38592,
-      "total_tokens": 31940120,
-      "uncached_input_tokens": 401728
+      "output_tokens": 100362,
+      "reasoning_output_tokens": 21940,
+      "total_tokens": 16329870,
+      "uncached_input_tokens": 257412
     },
     {
       "model": "gpt-6-sol",
       "reasoning_effort": "xhigh",
       "sessions": 1,
-      "input_tokens": 94895619,
-      "cached_input_tokens": 93690368,
+      "input_tokens": 69618097,
+      "cached_input_tokens": 68667264,
       "cache_write_input_tokens": 0,
-      "output_tokens": 361112,
-      "reasoning_output_tokens": 157746,
-      "total_tokens": 95256731,
-      "uncached_input_tokens": 1205251
+      "output_tokens": 300803,
+      "reasoning_output_tokens": 138167,
+      "total_tokens": 69918900,
+      "uncached_input_tokens": 950833
     }
   ],
   "sessions": [
@@ -118,14 +118,14 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "xhigh",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
-      "as_of": "2026-09-22T21:59:29.522Z",
-      "input_tokens": 94895619,
-      "cached_input_tokens": 93690368,
+      "as_of": "2026-09-22T21:25:17.176Z",
+      "input_tokens": 69618097,
+      "cached_input_tokens": 68667264,
       "cache_write_input_tokens": 0,
-      "output_tokens": 361112,
-      "reasoning_output_tokens": 157746,
-      "total_tokens": 95256731,
-      "uncached_input_tokens": 1205251
+      "output_tokens": 300803,
+      "reasoning_output_tokens": 138167,
+      "total_tokens": 69918900,
+      "uncached_input_tokens": 950833
     },
     {
       "role": "M1 importer builder",
@@ -163,29 +163,29 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "high",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T21-23-18-01a0cac9-8156-7050-9cb5-7d205f15622c.jsonl",
-      "as_of": "2026-09-22T21:45:25.594Z",
-      "input_tokens": 2576632,
-      "cached_input_tokens": 2477184,
+      "as_of": "2026-09-22T21:22:49.595Z",
+      "input_tokens": 1646509,
+      "cached_input_tokens": 1566208,
       "cache_write_input_tokens": 0,
-      "output_tokens": 24336,
-      "reasoning_output_tokens": 13613,
-      "total_tokens": 2600968,
-      "uncached_input_tokens": 99448
+      "output_tokens": 19365,
+      "reasoning_output_tokens": 11342,
+      "total_tokens": 1665874,
+      "uncached_input_tokens": 80301
     },
     {
-      "role": "M2 ephemeris, M3 spacecraft, M4 worker and M5 desktop builder",
-      "status": "completed",
+      "role": "M2 ephemeris and M3 spacecraft builder",
+      "status": "active snapshot",
       "model": "gpt-6-sol",
       "reasoning_effort": "medium",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T21-25-17-01a0cacb-51dc-7431-bf5b-1db8b05f96d0.jsonl",
-      "as_of": "2026-09-22T21:56:44.28Z",
-      "input_tokens": 26520278,
-      "cached_input_tokens": 26233472,
+      "as_of": "2026-09-22T21:25:26.066Z",
+      "input_tokens": 10962202,
+      "cached_input_tokens": 10819712,
       "cache_write_input_tokens": 0,
-      "output_tokens": 125220,
-      "reasoning_output_tokens": 33482,
-      "total_tokens": 26645498,
-      "uncached_input_tokens": 286806
+      "output_tokens": 73046,
+      "reasoning_output_tokens": 16830,
+      "total_tokens": 11035248,
+      "uncached_input_tokens": 142490
     }
   ]
 }

@@ -1,6 +1,6 @@
 # KSP mission analysis
 
-An external mission-analysis tool for Kerbal Space Program. The M1 system importer and an M2 synthetic planetary-ephemeris kernel are implemented. Ubuntu/Linux is the primary target; a Windows build is also required. The mission optimizer and desktop UI have not been started.
+An external mission-analysis tool for Kerbal Space Program. Ubuntu/Linux is the primary target; Windows builds are checked too. The repository contains a provisional JNSQ Reborn Real importer, a synthetic planetary and spacecraft numerical core, dated one-leg screening, a bounded synthetic worker, a runtime-snapshot exporter/reader contract, and the first GTK 3D window. The requested multi-leg mission workflow is still in progress.
 
 The current command-line importer reads a bounded set of JNSQ Reborn Real configuration fields, selects the Principia on/off branch, and emits a provenance-bearing JSON catalog. This is a **provisional raw-config preview**, not a verified loaded KSP/Principia state or an analysis-ready ephemeris. It must not be used to claim Principia-equivalent trajectories.
 
@@ -34,7 +34,11 @@ cmake --build build/core --config Release
 ctest --test-dir build/core -C Release --output-on-failure
 ```
 
-It currently accepts complete synthetic Cartesian snapshots in memory. The provisional JNSQ catalog cannot be integrated until a loaded state, frame and gravitational parameters are exported. See [M2 validation](docs/M2-VALIDATION.md).
+The numerical core accepts complete synthetic Cartesian snapshots in memory, and a C++ bridge validates the narrow Principia runtime JSON schema. The provisional JNSQ catalog cannot be integrated until a loaded state, frame and gravitational parameters are exported. The in-game exporter builds against the supplied KSP assemblies, but no Principia flight snapshot has been captured or compared. See [M2 validation](docs/M2-VALIDATION.md), [runtime snapshot contract](docs/RUNTIME-SNAPSHOT-CONTRACT.md), and [runtime status](docs/RUNTIME-EXPORTER-STATUS.md).
+
+The `ksp_worker` executable currently accepts one versioned JSON-line request per process and emits synthetic one-leg progress, screened seeds, and an optional terminal-position refinement. It is a protocol and numerical slice, not the requested multi-leg optimizer. The GTK `ksp_desktop` target opens a synthetic four-body 3D study with camera controls and mission fields; search and export stay disabled until a validated snapshot and worker are connected. See the [search contract](docs/M4-SEARCH-CONTRACT.md) and [desktop contract](docs/M5-DESKTOP-CONTRACT.md).
+
+On Ubuntu 24.04, install the approved GTK build packages listed in [dependencies](docs/DEPENDENCIES.md), then run the CMake commands above; `ksp_desktop` and `ksp_worker` are built when gtkmm4 and libepoxy are available. On Windows, use MSYS2 UCRT64 with the same approved package list and CMake commands. CI builds and tests both platforms, but the uploaded executables are build-check artifacts and are not packaged standalone installers.
 
 ## Project map
 
@@ -44,6 +48,11 @@ It currently accepts complete synthetic Cartesian snapshots in memory. The provi
 - [Importer source](src/KspMission.Import/) and [focused checks](tests/KspMission.Import.Tests/)
 - [M1 showcase and graphs](reports/m1-showcase/index.html)
 - [M2 ephemeris contract and validation](docs/M2-VALIDATION.md)
+- [M3 spacecraft checks](docs/M3-VALIDATION.md)
+- [M4 screening and refinement limits](docs/M4-SEARCH-CONTRACT.md)
+- [M5 desktop workflow and rendered slice](docs/M5-DESKTOP-CONTRACT.md)
+- [M4 checkpoint evidence](docs/M4-VALIDATION.md) and [M5 checkpoint evidence](docs/M5-VALIDATION.md)
+- [Disposable game runtime dependency and load evidence](docs/GAME-RUNTIME-DEPENDENCIES.md)
 - [Token benchmark method](benchmarks/README.md)
 
 Game archives, extracted mods, local browser data, and generated binaries stay under ignored `.work/`, `artifacts/`, or build output directories. They are not included in this repository. Benchmark session paths refer to local Codex logs and are useful only on the original development machine; the committed milestone snapshots and reports are the portable record.

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <KspManagedDir Condition="'$(KspManagedDir)' == ''">../../.work/reference-assemblies/KSP_x64_Data</KspManagedDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(KspManagedDir)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(KspManagedDir)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(KspManagedDir)/UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <Target Name="CheckKspReferences" BeforeTargets="CoreCompile" Condition="!Exists('$(KspManagedDir)/Assembly-CSharp.dll')">
+    <Error Text="Set KspManagedDir to a separately extracted KSP Managed directory. Do not commit game DLLs." />
+  </Target>
+</Project>

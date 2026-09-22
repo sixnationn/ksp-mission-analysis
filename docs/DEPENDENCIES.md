@@ -1,6 +1,6 @@
 # Dependencies proposed for M2-M6
 
-Status: proposed on 22 September 2026. Nothing in this list has been installed for this project. The current Windows host already has .NET 10, Visual Studio C++ tools, CMake and Ninja; M2 core work can start with those.
+Status: the user approved this consolidated list and CI on 22 September 2026. MSYS2 UCRT64 and the listed Windows packages are installed on the development host. The current Windows host also has .NET 10 and MSYS2 CMake/Ninja. The workflow now installs the approved GTK and OpenGL packages for native Ubuntu and Windows GTK build checks. CI results for those new jobs remain pending until the next push.
 
 The full product retains the planned C++ numerical worker, GTK 4/gtkmm desktop interface, and the existing .NET importer. Ubuntu is the primary build target, with a Windows build as well. Package versions can differ between distributions; the code must be tested on both.
 

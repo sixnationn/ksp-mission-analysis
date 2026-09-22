@@ -26,3 +26,25 @@ The M2 kernel checkpoint in `milestones/m2-kernel.json` was captured on 22 Septe
 | gpt-6-sol | high | 580,564 | 543,488 | 37,076 | 8,119 | 4,526 |
 
 Astra and Luna recorded no additional tokens in this interval. Input includes cached input; reasoning is a subset of output. The interval ends before this response and cannot be converted into an account-usage or billing figure.
+
+## M2 kernel to M4 screen checkpoint
+
+The `milestones/m4-screen.json` checkpoint was captured at 21:25:35 UTC. This interval contains M3 spacecraft propagation, the M4 Lambert/flyby/grid screen, runtime snapshot and exporter work, plus coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 28,148,807 | 27,776,384 | 372,423 | 98,172 | 37,765 |
+| gpt-6-sol | medium | 9,041,449 | 8,939,392 | 102,057 | 55,783 | 13,583 |
+| gpt-6-sol | high | 1,065,945 | 1,022,720 | 43,225 | 11,246 | 6,816 |
+
+## M4 screen to M5 import checkpoint
+
+The `milestones/m5-import.json` checkpoint was captured at 21:59:35 UTC. It includes M4 terminal-position refinement, the synthetic worker, the first rendered GTK slice and runtime JSON import, supplied game-mod diagnostics, and intervening conversation. The user-supplied EVE preview and Parallax texture downloads are not token charges; these rows are model runtime counters only.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 25,277,522 | 25,023,104 | 254,418 | 60,309 | 19,579 |
+| gpt-6-sol | medium | 15,558,076 | 15,413,760 | 144,316 | 52,174 | 16,652 |
+| gpt-6-sol | high | 930,123 | 910,976 | 19,147 | 4,971 | 2,271 |
+
+Astra and Luna have no additional recorded tokens in either interval. Total input already includes cached input, and reasoning is a subset of output. These are recorded tokens from registered sessions, not billing, account usage percentage or a price estimate. The active coordinator's final response is included only after the next turn refreshes the ledger.

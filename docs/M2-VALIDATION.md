@@ -24,4 +24,4 @@ The independent reference shares the fixture values and vector operators but has
 - The current cache is in memory. A persisted, versioned snapshot/cache file and its reload validation are still needed for repeatable mission runs.
 - The collision safety bound avoids claiming a clear chord is a collision and forces ambiguous close approaches into smaller substeps or a failure. The local boundary time uses a constant-acceleration approximation at the final resolution; an independent close-encounter trajectory comparison is still needed before mission-clearance claims.
 - The current frame API trusts an upstream inertial-frame assertion. A runtime exporter and recorded transform provenance must be added before a real KSP/Principia snapshot can be integrated.
-- Native Ubuntu build and execution of this C++ core are pending the new CI result. KSP and Principia comparison has not been attempted.
+- [CI run 35781897513](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35781897513) passed the CMake/CTest ephemeris job on Ubuntu 24.04 and Windows 2022. KSP and Principia comparison has not been attempted.
