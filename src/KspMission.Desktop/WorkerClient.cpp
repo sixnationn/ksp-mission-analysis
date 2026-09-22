@@ -78,6 +78,14 @@ double check_route(const json& route,const std::string& hash,const std::string& 
                  total=finite_field(route,"total_optimistic_delta_v_mps");
     if(a<0||b<0||c<0||d<0||std::abs((a+b+c+d)-total)>1e-6)
         throw WorkerClientError("route burn total invalid");
+    const double departure_vinf=finite_field(first,"departure_vinf_mps");
+    const double return_vinf=finite_field(third,"arrival_vinf_mps");
+    const double departure_c3=finite_field(route,"departure_c3_m2_s2");
+    const double return_c3=finite_field(route,"return_c3_m2_s2");
+    if(departure_vinf<0||return_vinf<0||departure_c3<0||return_c3<0||
+       std::abs(departure_c3-departure_vinf*departure_vinf)>std::max(1e-6,departure_c3*1e-9)||
+       std::abs(return_c3-return_vinf*return_vinf)>std::max(1e-6,return_c3*1e-9))
+        throw WorkerClientError("route C3 convention invalid");
     const double periapsis=finite_field(route,"venus_minimum_periapsis_m");
     const double clearance=finite_field(route,"venus_clearance_radius_m");
     const double margin=finite_field(route,"venus_periapsis_margin_m");

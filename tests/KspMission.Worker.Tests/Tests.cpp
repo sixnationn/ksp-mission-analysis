@@ -253,6 +253,12 @@ void mission_protocol(){
     check(row["home_injection_mps"]>0&&row["mars_capture_mps"]>0&&row["mars_departure_mps"]>0&&
           row["home_return_capture_mps"]>0&&row["total_optimistic_delta_v_mps"]>0&&
           row["venus_periapsis_margin_m"]>=0,"four burns and flyby clearance");
+    check(row.contains("departure_c3_m2_s2")&&row.contains("return_c3_m2_s2")&&
+          std::abs(row["departure_c3_m2_s2"].get<double>()-
+              std::pow(row["home_mars"]["departure_vinf_mps"].get<double>(),2))<1e-6&&
+          std::abs(row["return_c3_m2_s2"].get<double>()-
+              std::pow(row["venus_home"]["arrival_vinf_mps"].get<double>(),2))<1e-6,
+          "departure and return C3 conventions");
     check(has(out,"route"),"provisional route update emitted");
     const auto s=mission_snapshot();Settings settings;settings.start_ut_s=0;settings.end_ut_s=310000000;
     settings.step_s=10000;settings.max_position_fit_error_m=1e6;settings.max_velocity_fit_error_mps=1000;settings.max_steps=100000;

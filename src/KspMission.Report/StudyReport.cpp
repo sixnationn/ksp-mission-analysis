@@ -236,6 +236,16 @@ void validate_study_report(const json& document){
             throw StudyReportError("burn total mismatch");
         if(total<prior_total)throw StudyReportError("route ranking invalid");
         prior_total=total;
+        if(route.contains("departure_c3_m2_s2")||route.contains("return_c3_m2_s2")){
+            const double departure_c3=number(route,"departure_c3_m2_s2");
+            const double return_c3=number(route,"return_c3_m2_s2");
+            const double departure_vinf=number(legs[0],"departure_vinf_mps");
+            const double return_vinf=number(legs[2],"arrival_vinf_mps");
+            if(departure_c3<0||return_c3<0||departure_vinf<0||return_vinf<0||
+               std::abs(departure_c3-departure_vinf*departure_vinf)>std::max(1e-6,departure_c3*1e-9)||
+               std::abs(return_c3-return_vinf*return_vinf)>std::max(1e-6,return_c3*1e-9))
+                throw StudyReportError("route C3 invalid");
+        }
         if(number(route,"flyby_periapsis_margin_m")<0)throw StudyReportError("unsafe flyby margin");
     }
 }

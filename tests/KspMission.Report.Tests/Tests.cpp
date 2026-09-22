@@ -19,16 +19,19 @@ template<class F> void rejects(F call,const char* fragment){try{call();}catch(co
     throw std::runtime_error(fragment);}
 json report(){
     const json leg1={{"departure_ut_s",0.0},{"arrival_ut_s",1000.0},{"departure_body_id","home"},
-        {"arrival_body_id","mars"},{"branch","short"},{"direction","positive"}};
+        {"arrival_body_id","mars"},{"branch","short"},{"direction","positive"},
+        {"departure_vinf_mps",3.0}};
     const json leg2={{"departure_ut_s",5185000.0},{"arrival_ut_s",5186000.0},{"departure_body_id","mars"},
         {"arrival_body_id","venus"},{"branch","short"},{"direction","positive"}};
     const json leg3={{"departure_ut_s",5186000.0},{"arrival_ut_s",5187000.0},{"departure_body_id","venus"},
-        {"arrival_body_id","home"},{"branch","short"},{"direction","positive"}};
+        {"arrival_body_id","home"},{"branch","short"},{"direction","positive"},
+        {"arrival_vinf_mps",4.0}};
     const json route={{"route_id","route-search-fixture:0:1:2"},{"result_label","patched_conic_screened_route"},
         {"snapshot_hash","route-search-fixture"},{"source_confidence","synthetic_fixture"},
         {"legs",json::array({leg1,leg2,leg3})},{"fixed_stay_s",5184000.0},
         {"home_injection_mps",10.0},{"mars_capture_mps",20.0},{"mars_departure_mps",30.0},
         {"home_return_capture_mps",40.0},{"total_optimistic_delta_v_mps",100.0},
+        {"departure_c3_m2_s2",9.0},{"return_c3_m2_s2",16.0},
         {"flyby_periapsis_margin_m",1000.0}};
     return {{"schema_version",1},
         {"source",{{"snapshot_hash","route-search-fixture"},{"confidence","synthetic_fixture"},
@@ -89,6 +92,10 @@ void cases(){
     wrong=original;wrong["mission"]["fixed_stay_s"]=5184001;rejects([&]{validate_study_report(wrong);},"stay");
     wrong=original;wrong["result"]["ranked_routes"][0]["total_optimistic_delta_v_mps"]=101;
     rejects([&]{validate_study_report(wrong);},"burn total");
+    wrong=original;wrong["result"]["ranked_routes"][0]["return_c3_m2_s2"]=-1;
+    rejects([&]{validate_study_report(wrong);},"C3");
+    wrong=original;wrong["result"]["ranked_routes"][0]["return_c3_m2_s2"]=17;
+    rejects([&]{validate_study_report(wrong);},"C3");
     wrong=original;wrong["result"]["ranked_routes"][0]["legs"][1]["departure_ut_s"]=5185001;
     wrong["result"]["ranked_routes"][0]["legs"][1]["arrival_ut_s"]=5186001;
     wrong["result"]["ranked_routes"][0]["legs"][2]["departure_ut_s"]=5186001;

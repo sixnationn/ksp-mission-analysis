@@ -39,14 +39,15 @@ json screened_route(){
  json r={{"route_id","synthetic-worker-v1:route"},{"result_label","patched_conic_screened_route"},
   {"snapshot_hash","synthetic-worker-v1"},{"source_confidence","synthetic_fixture"},
   {"home_mars",{{"central_body_id","sun"},{"departure_body_id","home"},{"arrival_body_id","mars"},
-   {"departure_ut_s",0.0},{"arrival_ut_s",1000.0}}},
+   {"departure_ut_s",0.0},{"arrival_ut_s",1000.0},{"departure_vinf_mps",3.0}}},
   {"mars_venus",{{"central_body_id","sun"},{"departure_body_id","mars"},{"arrival_body_id","venus"},
    {"departure_ut_s",5185000.0},{"arrival_ut_s",5186000.0}}},
   {"venus_home",{{"central_body_id","sun"},{"departure_body_id","venus"},{"arrival_body_id","home"},
-   {"departure_ut_s",5186000.0},{"arrival_ut_s",5187000.0}}},
+   {"departure_ut_s",5186000.0},{"arrival_ut_s",5187000.0},{"arrival_vinf_mps",4.0}}},
   {"fixed_stay_s",5184000.0},{"home_injection_mps",10.0},{"mars_capture_mps",20.0},
   {"mars_departure_mps",30.0},{"home_return_capture_mps",40.0},
   {"total_optimistic_delta_v_mps",100.0},{"venus_minimum_periapsis_m",2000.0},
+  {"departure_c3_m2_s2",9.0},{"return_c3_m2_s2",16.0},
   {"venus_clearance_radius_m",1000.0},{"venus_periapsis_margin_m",1000.0}};
  return r;
 }
@@ -57,6 +58,8 @@ void mission_validator_cases(){
  v.accept_line(route.dump());++checks;
  auto bad=route;bad["total_optimistic_delta_v_mps"]=101;
  rejects([&]{v.accept_line(bad.dump());},"burn total");
+ bad=route;bad["return_c3_m2_s2"]=17.0;
+ rejects([&]{v.accept_line(bad.dump());},"C3");
  bad=route;bad["source_confidence"]="runtime_observed_uncompared";
  rejects([&]{v.accept_line(bad.dump());},"source confidence");
  auto complete=event("complete");auto row=screened_route();row["rank"]=1;

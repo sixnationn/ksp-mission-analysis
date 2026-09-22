@@ -556,6 +556,8 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
                 " · Mars capture "+fixed(row.at("mars_capture_mps").get<double>(),2)+
                 " · Mars departure "+fixed(row.at("mars_departure_mps").get<double>(),2)+
                 " · home capture "+fixed(row.at("home_return_capture_mps").get<double>(),2)+
+                "\nC3 m²/s²: departure "+fixed(row.at("departure_c3_m2_s2").get<double>(),2)+
+                " · return "+fixed(row.at("return_c3_m2_s2").get<double>(),2)+
                 "\n"+row.at("result_label").get<std::string>()+"  ·  "+row.at("route_id").get<std::string>();
             route_rows_.append(*label(text,"small"));
         }

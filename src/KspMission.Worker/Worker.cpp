@@ -147,6 +147,8 @@ json route_json(const ScreenedRoute& route){
         {"home_injection_mps",route.home_injection_mps},{"mars_capture_mps",route.mars_capture_mps},
         {"mars_departure_mps",route.mars_departure_mps},{"home_return_capture_mps",route.home_return_capture_mps},
         {"total_optimistic_delta_v_mps",route.total_optimistic_delta_v_mps},
+        {"departure_c3_m2_s2",route.departure_c3_m2_s2},
+        {"return_c3_m2_s2",route.return_c3_m2_s2},
         {"venus_minimum_periapsis_m",route.flyby.minimum_periapsis_m},
         {"venus_clearance_radius_m",route.flyby.minimum_periapsis_m-route.flyby.periapsis_margin_m},
         {"venus_periapsis_margin_m",route.flyby.periapsis_margin_m},
