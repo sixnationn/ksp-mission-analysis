@@ -80,7 +80,10 @@ void blocked_write_cases(const std::string& fake){
 }
 void real_case(const std::string& worker){WorkerClient c;auto x=options(worker,"valid");x.arguments.clear();
  check(c.start(x),"real worker launched");auto events=finish(c);
- check(!events.empty()&&events.front()["type"]=="started"&&events.back()["type"]=="complete","real worker ordered terminal");}
+ if(events.empty()||events.front().value("type",std::string{})!="started"||
+    events.back().value("type",std::string{})!="complete")
+  throw std::runtime_error("real worker ordered terminal: "+json(events).dump());
+ ++checks;}
 }
 int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);
  std::cout<<"PASS "<<checks<<" worker client checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
