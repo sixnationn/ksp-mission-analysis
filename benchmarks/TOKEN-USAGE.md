@@ -1,4 +1,4 @@
-﻿# Token benchmark
+# Token benchmark
 
 Registered task sessions only; active response is incomplete until next refresh.
 
@@ -8,12 +8,12 @@ Recorded runtime counters, not an invoice or weekly-limit estimate. Model attrib
 
 | Model | Effort | Sessions | Fresh input | Cached input | Output | Reasoning subset | Total |
 |---|---|---:|---:|---:|---:|---:|---:|
-| gpt-6-astra | medium | 1 | 206571 | 2700032 | 15499 | 852 | 2922102 |
 | gpt-6-astra | high | 1 | 54319 | 326528 | 2325 | 175 | 383172 |
-| gpt-6-sol | high | 3 | 346644 | 7946752 | 47771 | 22126 | 8341167 |
-| gpt-6-sol | xhigh | 1 | 1727911 | 149018880 | 527335 | 233056 | 151274126 |
-| gpt-6-sol | medium | 2 | 657752 | 56708352 | 269847 | 76236 | 57635951 |
+| gpt-6-astra | medium | 1 | 206571 | 2700032 | 15499 | 852 | 2922102 |
+| gpt-6-sol | high | 3 | 581985 | 9545472 | 56570 | 26813 | 10184027 |
+| gpt-6-sol | medium | 2 | 929945 | 64190336 | 305077 | 87359 | 65425358 |
+| gpt-6-sol | xhigh | 1 | 1876501 | 172685184 | 570284 | 248966 | 175131969 |
 
-Captured UTC: 2026-09-22T23:26:03.1794560Z
+Captured UTC: 2026-09-22T23:59:15.1012569Z
 
 See token-usage.csv for per-session roles, source paths and each counter timestamp. Refresh next turn to include the coordinator final response.

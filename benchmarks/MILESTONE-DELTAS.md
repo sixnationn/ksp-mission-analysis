@@ -95,3 +95,15 @@ The `milestones/m5-runtime-workflow.json` checkpoint was captured at 23:26:03 UT
 | gpt-6-sol | medium | 10,205,875 | 10,120,576 | 85,299 | 41,510 | 11,644 |
 
 Sol High, Astra and Luna recorded no new tokens in this interval. Cached input is included in total input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator's final response enters on the next refresh.
+
+## Runtime mission workflow to fixed-impulse checkpoint
+
+The `milestones/m4-fixed-impulse.json` checkpoint was captured at 23:59:15 UTC on 22 September 2026. This interval includes the three-leg worker route, C3 and report changes, CI fixes, fixed-impulse n-body evaluator, review and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 23,814,894 | 23,666,304 | 148,590 | 42,949 | 15,910 |
+| gpt-6-sol | medium | 7,754,177 | 7,481,984 | 272,193 | 35,230 | 11,123 |
+| gpt-6-sol | high | 1,834,061 | 1,598,720 | 235,341 | 8,799 | 4,687 |
+
+Astra and Luna recorded no new tokens in this interval. Input includes cached input; reasoning is a subset of output. These are task-session runtime counters, not billing or the account's weekly usage. The active coordinator's final response enters only after the next refresh.
