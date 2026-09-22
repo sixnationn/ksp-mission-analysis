@@ -35,6 +35,39 @@ void validator_cases(){WorkerEventValidator v("client-test","synthetic-worker-v1
  rejects([&]{v.accept_line(bad.dump());},"ranked order");
  WorkerEventValidator clean("client-test","synthetic-worker-v1","synthetic_fixture",8);
  clean.accept_line(event("started").dump());clean.accept_line(event("complete").dump());check(clean.terminal(),"terminal accepted");}
+json screened_route(){
+ json r={{"route_id","synthetic-worker-v1:route"},{"result_label","patched_conic_screened_route"},
+  {"snapshot_hash","synthetic-worker-v1"},{"source_confidence","synthetic_fixture"},
+  {"home_mars",{{"central_body_id","sun"},{"departure_body_id","home"},{"arrival_body_id","mars"},
+   {"departure_ut_s",0.0},{"arrival_ut_s",1000.0}}},
+  {"mars_venus",{{"central_body_id","sun"},{"departure_body_id","mars"},{"arrival_body_id","venus"},
+   {"departure_ut_s",5185000.0},{"arrival_ut_s",5186000.0}}},
+  {"venus_home",{{"central_body_id","sun"},{"departure_body_id","venus"},{"arrival_body_id","home"},
+   {"departure_ut_s",5186000.0},{"arrival_ut_s",5187000.0}}},
+  {"fixed_stay_s",5184000.0},{"home_injection_mps",10.0},{"mars_capture_mps",20.0},
+  {"mars_departure_mps",30.0},{"home_return_capture_mps",40.0},
+  {"total_optimistic_delta_v_mps",100.0},{"venus_minimum_periapsis_m",2000.0},
+  {"venus_clearance_radius_m",1000.0},{"venus_periapsis_margin_m",1000.0}};
+ return r;
+}
+void mission_validator_cases(){
+ WorkerEventValidator v("client-test","synthetic-worker-v1","synthetic_fixture",5,WorkerResultKind::screened_route);
+ auto started=event("started");started["total_cells"]=3;v.accept_line(started.dump());
+ auto route=screened_route();route["type"]="route";route["protocol_version"]=1;route["request_id"]="client-test";
+ v.accept_line(route.dump());++checks;
+ auto bad=route;bad["total_optimistic_delta_v_mps"]=101;
+ rejects([&]{v.accept_line(bad.dump());},"burn total");
+ bad=route;bad["source_confidence"]="runtime_observed_uncompared";
+ rejects([&]{v.accept_line(bad.dump());},"source confidence");
+ auto complete=event("complete");auto row=screened_route();row["rank"]=1;
+ complete["ranked_routes"]=json::array({row});v.accept_line(complete.dump());check(v.terminal(),"mission terminal accepted");
+ WorkerEventValidator duplicate("client-test","synthetic-worker-v1","synthetic_fixture",5,WorkerResultKind::screened_route);
+ duplicate.accept_line(started.dump());auto repeated=complete;
+ repeated["ranked_routes"].push_back(row);repeated["ranked_routes"][1]["rank"]=2;
+ rejects([&]{duplicate.accept_line(repeated.dump());},"duplicate route_id");
+ WorkerEventValidator wrong_mode("client-test","synthetic-worker-v1","synthetic_fixture",5);
+ wrong_mode.accept_line(started.dump());rejects([&]{wrong_mode.accept_line(route.dump());},"event type");
+}
 ClientOptions options(const std::string& path,const std::string& mode){ClientOptions x;x.executable_path=path;x.arguments={mode};
  x.request_line=request();x.request_id="client-test";x.expected_snapshot_hash="synthetic-worker-v1";
  x.expected_source_confidence="synthetic_fixture";x.timeout=std::chrono::milliseconds(5000);
@@ -84,6 +117,35 @@ void real_case(const std::string& worker){WorkerClient c;auto x=options(worker,"
     events.back().value("type",std::string{})!="complete")
   throw std::runtime_error("real worker ordered terminal: "+json(events).dump());
  ++checks;}
+void real_mission_case(const std::string& worker){
+ json request={{"protocol_version",1},{"command","start_mission"},{"request_id","mission-client-test"},
+  {"source",{{"mode","synthetic_mission_fixture"},{"expected_snapshot_hash","synthetic-mission-worker-v1"},
+   {"expected_frame_origin","barycenter"},{"expected_frame_axes","X,Y,Z"},{"expected_state_epoch_ut_s",0.0}}},
+  {"ephemeris",{{"end_ut_s",310000000.0},{"step_s",10000.0},
+   {"max_position_fit_error_m",1e6},{"max_velocity_fit_error_mps",1000.0}}},
+  {"mission",{{"central_body_id","sun"},{"home_body_id","home"},{"mars_body_id","mars"},{"venus_body_id","venus"},
+   {"reference_normal",{0,0,1}},{"launch_start_ut_s",0.0},{"launch_end_ut_s",0.0},{"launch_step_s",1.0},
+   {"legs",json::array({{{"min_s",100000000.0},{"max_s",100000000.0},{"step_s",1.0},{"branch","short"},{"direction","positive"}},
+    {{"min_s",100000000.0},{"max_s",100000000.0},{"step_s",1.0},{"branch","short"},{"direction","negative"}},
+    {{"min_s",50000000.0},{"max_s",50000000.0},{"step_s",1.0},{"branch","short"},{"direction","positive"}}})},
+   {"fixed_stay_s",5184000.0},{"time_tolerance_s",0.0},{"max_total_duration_s",310000000.0},
+   {"home_parking_altitude_m",100000.0},{"mars_parking_altitude_m",200000.0},{"return_capture_altitude_m",100000.0},
+   {"venus_safety_margin_m",1000.0},{"venus_maximum_periapsis_m",1e12},{"venus_speed_tolerance_mps",1000.0},
+   {"max_lambert_position_residual_m",1000000.0},{"max_lambert_velocity_residual_mps",100.0},
+   {"central_safety_margin_m",0.0},{"max_cells",100},{"max_routes",5}}}};
+ WorkerClient c;ClientOptions x;x.executable_path=worker;x.request_line=request.dump();
+ x.request_id="mission-client-test";x.expected_snapshot_hash="synthetic-mission-worker-v1";
+ x.expected_source_confidence="synthetic_fixture";x.result_kind=WorkerResultKind::screened_route;
+ x.max_candidates=5;x.timeout=std::chrono::seconds(15);
+ check(c.start(x),"real mission worker launched");
+ check(c.wait_for(std::chrono::seconds(18)),"real mission worker exits");
+ const auto events=c.drain();
+ if(events.empty()||events.front().value("type",std::string{})!="started"||
+    events.back().value("type",std::string{})!="complete"||
+    events.back()["ranked_routes"].empty())
+  throw std::runtime_error("real mission event stream: "+json(events).dump());
+ ++checks;
 }
-int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);
+}
+int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();mission_validator_cases();process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);real_mission_case(argv[1]);
  std::cout<<"PASS "<<checks<<" worker client checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <utility>
 #ifdef _WIN32
@@ -35,6 +36,69 @@ std::size_t count(const json& value,const char* key){
 std::string text_field(const json& value,const char* key){
     if(!value.contains(key)||!value.at(key).is_string())throw WorkerClientError(std::string(key)+" invalid");
     return value.at(key).get<std::string>();
+}
+double finite_field(const json& value,const char* key){
+    if(!value.is_object()||!value.contains(key)||!value.at(key).is_number())
+        throw WorkerClientError(std::string(key)+" invalid");
+    const double result=value.at(key).get<double>();
+    if(!std::isfinite(result))throw WorkerClientError(std::string(key)+" nonfinite");
+    return result;
+}
+const json& object_field(const json& value,const char* key){
+    if(!value.is_object()||!value.contains(key)||!value.at(key).is_object())
+        throw WorkerClientError(std::string(key)+" invalid");
+    return value.at(key);
+}
+double check_route(const json& route,const std::string& hash,const std::string& confidence){
+    const auto id=text_field(route,"route_id");
+    if(id.rfind(hash+":",0)!=0)throw WorkerClientError("route_id source mismatch");
+    if(text_field(route,"result_label")!="patched_conic_screened_route")
+        throw WorkerClientError("route result_label invalid");
+    if(text_field(route,"snapshot_hash")!=hash)throw WorkerClientError("route snapshot_hash mismatch");
+    if(text_field(route,"source_confidence")!=confidence)throw WorkerClientError("route source confidence mismatch");
+    const auto& first=object_field(route,"home_mars");
+    const auto& second=object_field(route,"mars_venus");
+    const auto& third=object_field(route,"venus_home");
+    const auto central=text_field(first,"central_body_id");
+    const auto home=text_field(first,"departure_body_id"),mars=text_field(first,"arrival_body_id");
+    const auto venus=text_field(second,"arrival_body_id");
+    if(central!=text_field(second,"central_body_id")||central!=text_field(third,"central_body_id")||
+       mars!=text_field(second,"departure_body_id")||venus!=text_field(third,"departure_body_id")||
+       home!=text_field(third,"arrival_body_id")||
+       std::set<std::string>{central,home,mars,venus}.size()!=4)
+        throw WorkerClientError("route roles invalid");
+    const double start1=finite_field(first,"departure_ut_s"),end1=finite_field(first,"arrival_ut_s");
+    const double start2=finite_field(second,"departure_ut_s"),end2=finite_field(second,"arrival_ut_s");
+    const double start3=finite_field(third,"departure_ut_s"),end3=finite_field(third,"arrival_ut_s");
+    if(end1<=start1||end2<=start2||end3<=start3||start2!=end1+5184000.0||start3!=end2||
+       finite_field(route,"fixed_stay_s")!=5184000.0)
+        throw WorkerClientError("route dates or fixed stay invalid");
+    const double a=finite_field(route,"home_injection_mps"),b=finite_field(route,"mars_capture_mps"),
+                 c=finite_field(route,"mars_departure_mps"),d=finite_field(route,"home_return_capture_mps"),
+                 total=finite_field(route,"total_optimistic_delta_v_mps");
+    if(a<0||b<0||c<0||d<0||std::abs((a+b+c+d)-total)>1e-6)
+        throw WorkerClientError("route burn total invalid");
+    const double periapsis=finite_field(route,"venus_minimum_periapsis_m");
+    const double clearance=finite_field(route,"venus_clearance_radius_m");
+    const double margin=finite_field(route,"venus_periapsis_margin_m");
+    if(clearance<0||periapsis<clearance||margin<0||std::abs((periapsis-clearance)-margin)>1e-6)
+        throw WorkerClientError("route flyby clearance invalid");
+    return total;
+}
+void check_ranked_routes(const json& event,std::size_t cap,const std::string& hash,const std::string& confidence){
+    if(!event.contains("ranked_routes")||!event.at("ranked_routes").is_array())
+        throw WorkerClientError("ranked_routes missing");
+    const auto& routes=event.at("ranked_routes");
+    if(routes.size()>cap)throw WorkerClientError("ranked_routes exceeds cap");
+    std::set<std::string> ids;double previous=-1;
+    for(std::size_t i=0;i<routes.size();++i){
+        const auto& route=routes[i];
+        if(count(route,"rank")!=i+1)throw WorkerClientError("ranked_routes rank invalid");
+        const auto total=check_route(route,hash,confidence);
+        if(total<previous)throw WorkerClientError("ranked_routes objective regression");
+        previous=total;
+        if(!ids.insert(text_field(route,"route_id")).second)throw WorkerClientError("duplicate route_id");
+    }
 }
 void check_ranked(const json& value,std::size_t max_candidates,const std::string& hash,const std::string& confidence){
     if(!value.contains("ranked_candidates")||!value.at("ranked_candidates").is_array())throw WorkerClientError("ranked order missing");
@@ -133,8 +197,10 @@ struct Child {
 #endif
 }
 
-WorkerEventValidator::WorkerEventValidator(std::string id,std::string hash,std::string confidence,std::size_t cap)
-    :request_id_(std::move(id)),snapshot_hash_(std::move(hash)),source_confidence_(std::move(confidence)),max_candidates_(cap){}
+WorkerEventValidator::WorkerEventValidator(std::string id,std::string hash,std::string confidence,std::size_t cap,
+                                           WorkerResultKind result_kind)
+    :request_id_(std::move(id)),snapshot_hash_(std::move(hash)),source_confidence_(std::move(confidence)),
+     max_candidates_(cap),result_kind_(result_kind){}
 json WorkerEventValidator::accept_line(const std::string& line){
     if(line.size()>line_limit)throw WorkerClientError("event line limit exceeded");
     json event=json::parse(line,nullptr,false);
@@ -143,8 +209,12 @@ json WorkerEventValidator::accept_line(const std::string& line){
         throw WorkerClientError("protocol_version mismatch");
     if(text_field(event,"request_id")!=request_id_)throw WorkerClientError("request_id mismatch");
     const auto type=text_field(event,"type");
-    if(type!="started"&&type!="progress"&&type!="candidate"&&type!="refinement"&&type!="complete"&&type!="cancelled"&&type!="error")
+    if(type!="started"&&type!="progress"&&type!="candidate"&&type!="refinement"&&type!="route"&&
+       type!="complete"&&type!="cancelled"&&type!="error")
         throw WorkerClientError("event type unsupported");
+    if((result_kind_==WorkerResultKind::screened_seed&&type=="route")||
+       (result_kind_==WorkerResultKind::screened_route&&(type=="candidate"||type=="refinement")))
+        throw WorkerClientError("event type invalid for result kind");
     if(terminal_)throw WorkerClientError("event after terminal");
     const bool identity_present=event.contains("snapshot_hash")||event.contains("source_confidence");
     if(type!="error"||started_||identity_present){
@@ -153,7 +223,10 @@ json WorkerEventValidator::accept_line(const std::string& line){
     }
     if(type=="started"){
         if(started_)throw WorkerClientError("duplicate started event");
-        total_cells_=count(event,"total_cells");if(total_cells_==0||total_cells_>1000000)throw WorkerClientError("total_cells invalid");started_=true;
+        total_cells_=count(event,"total_cells");
+        if(total_cells_==0||total_cells_>(result_kind_==WorkerResultKind::screened_route?100000:1000000))
+            throw WorkerClientError("total_cells invalid");
+        started_=true;
     }else if(type!="error"&&!started_)throw WorkerClientError("event before started");
     if(type=="progress"){
         const auto sampled=count(event,"sampled_cells"),total=count(event,"total_cells");
@@ -161,7 +234,12 @@ json WorkerEventValidator::accept_line(const std::string& line){
         last_sampled_=sampled;
     }
     if(type=="candidate"&&text_field(event,"status")!="screened_seed")throw WorkerClientError("candidate status invalid");
-    if(type=="complete"||type=="cancelled")check_ranked(event,max_candidates_,snapshot_hash_,source_confidence_);
+    if(type=="route")check_route(event,snapshot_hash_,source_confidence_);
+    if(type=="complete"||type=="cancelled"){
+        if(result_kind_==WorkerResultKind::screened_route)
+            check_ranked_routes(event,max_candidates_,snapshot_hash_,source_confidence_);
+        else check_ranked(event,max_candidates_,snapshot_hash_,source_confidence_);
+    }
     if(type=="complete"||type=="cancelled"||type=="error")terminal_=true;
     return event;
 }
@@ -217,7 +295,8 @@ void WorkerClient::run(ClientOptions options) noexcept {
         if(write_stop_reason.load()==3){failure("timeout","request write exceeded deadline",cap);active_.store(false);return;}
         if(!written){
             failure("request_write_failed","worker request could not be written",cap);active_.store(false);return;}
-        WorkerEventValidator validator(options.request_id,options.expected_snapshot_hash,options.expected_source_confidence,options.max_candidates);
+        WorkerEventValidator validator(options.request_id,options.expected_snapshot_hash,options.expected_source_confidence,
+                                       options.max_candidates,options.result_kind);
         std::string partial;
         std::chrono::steady_clock::time_point cancel_at{};bool cancel_sent=false;
         auto receive=[&](const char* bytes,std::size_t size,bool from_stderr){

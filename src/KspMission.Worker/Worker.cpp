@@ -1,12 +1,14 @@
 #include "Worker.hpp"
 #include "SearchGrid.hpp"
 #include "Refine.hpp"
+#include "MissionSearch.hpp"
 #include "RuntimeReader.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -74,6 +76,237 @@ json ranked_json(const GridRequest& q,std::vector<DatedLegCandidate> candidates)
 bool lower_sha256(const std::string& hash){
     return hash.size()==64&&std::all_of(hash.begin(),hash.end(),[](unsigned char c){return std::isdigit(c)||(c>='a'&&c<='f');});
 }
+Snapshot mission_fixture(){
+    Snapshot s;s.analysis_ready=true;s.confidence="synthetic_fixture";s.snapshot_hash="synthetic-mission-worker-v1";
+    s.state_epoch_ut_s=0;s.frame={"barycenter","X,Y,Z","right",true};
+    const double radius=1e11,angle=std::acos(-1.0)/3,c=std::cos(angle),t=std::sin(angle),speed=1000;
+    s.bodies={{"sun",1e17,1e5,State{{0,0,0},{0,0,0}},0},
+        {"home",1e12,1e4,State{{radius,0,0},{0,speed,0}},0},
+        {"mars",2e12,1e4,State{{radius*c,radius*t,0},{-speed*t,speed*c,0}},0},
+        {"venus",1e13,1e4,State{{radius*c,-radius*t,0},{speed*t,speed*c,0}},0}};
+    Vec3 centre{},drift{};double total_mu=0;
+    for(const auto& body:s.bodies){total_mu+=body.mu_m3_s2;
+        centre=centre+body.state->position_m*body.mu_m3_s2;
+        drift=drift+body.state->velocity_mps*body.mu_m3_s2;}
+    centre=centre*(1/total_mu);drift=drift*(1/total_mu);
+    for(auto& body:s.bodies){body.state->position_m=body.state->position_m-centre;
+        body.state->velocity_mps=body.state->velocity_mps-drift;}
+    return s;
+}
+double required_number(const json& object,const char* key){
+    const double value=object.at(key).get<double>();
+    if(!std::isfinite(value))throw std::invalid_argument(std::string(key)+" must be finite");
+    return value;
+}
+std::size_t required_cap(const json& object,const char* key,std::size_t limit){
+    const auto& value=object.at(key);
+    if(!value.is_number_unsigned()&&!value.is_number_integer())throw std::invalid_argument(std::string(key)+" must be integer");
+    const auto number=value.get<std::int64_t>();
+    if(number<=0||static_cast<std::uint64_t>(number)>limit)throw std::invalid_argument(std::string(key)+" cap invalid");
+    return static_cast<std::size_t>(number);
+}
+void mission_settings(const json& object,Settings& settings,double epoch){
+    settings.start_ut_s=epoch;settings.end_ut_s=required_number(object,"end_ut_s");
+    settings.step_s=required_number(object,"step_s");
+    settings.max_position_fit_error_m=required_number(object,"max_position_fit_error_m");
+    settings.max_velocity_fit_error_mps=required_number(object,"max_velocity_fit_error_mps");
+    const double steps=(settings.end_ut_s-epoch)/settings.step_s;
+    if(settings.step_s<=0||settings.end_ut_s<=epoch||settings.max_position_fit_error_m<=0||
+       settings.max_velocity_fit_error_mps<=0||!std::isfinite(steps)||steps<1||steps>100000||
+       std::abs(steps-std::round(steps))>1e-9)throw std::invalid_argument("mission ephemeris settings or step cap invalid");
+    settings.max_steps=100000;
+}
+FlightGrid mission_flight(const json& object){
+    FlightGrid grid;grid.min_s=required_number(object,"min_s");grid.max_s=required_number(object,"max_s");
+    grid.step_s=required_number(object,"step_s");
+    (void)cells(grid.min_s,grid.max_s,grid.step_s);
+    if(grid.min_s<=0)throw std::invalid_argument("positive flight time required");
+    const auto branch=object.at("branch").get<std::string>(),direction=object.at("direction").get<std::string>();
+    if(branch!="short"&&branch!="long")throw std::invalid_argument("mission branch invalid");
+    if(direction!="positive"&&direction!="negative")throw std::invalid_argument("mission direction invalid");
+    grid.branch=branch=="short"?TransferBranch::short_path:TransferBranch::long_path;
+    grid.direction=direction=="positive"?AngularMomentumDirection::positive:AngularMomentumDirection::negative;
+    return grid;
+}
+json route_leg(const DatedLegCandidate& leg){
+    return {{"central_body_id",leg.central_body_id},{"departure_body_id",leg.departure_body_id},
+        {"arrival_body_id",leg.arrival_body_id},{"branch",leg.branch==TransferBranch::short_path?"short":"long"},
+        {"direction",leg.direction==AngularMomentumDirection::positive?"positive":"negative"},
+        {"departure_ut_s",leg.departure_ut_s},{"arrival_ut_s",leg.arrival_ut_s},
+        {"flight_time_s",leg.flight_time_s},{"departure_velocity_mps",vector_json(leg.departure_barycentric_velocity_mps)},
+        {"arrival_velocity_mps",vector_json(leg.arrival_barycentric_velocity_mps)},
+        {"departure_vinf_mps",leg.departure_vinf_mps},{"arrival_vinf_mps",leg.arrival_vinf_mps},
+        {"lambert_position_residual_m",leg.lambert.position_residual_m},
+        {"lambert_velocity_residual_mps",leg.lambert.velocity_residual_mps}};
+}
+json route_json(const ScreenedRoute& route){
+    return {{"route_id",route.route_id},{"result_label",route.result_label},
+        {"snapshot_hash",route.snapshot_hash},{"source_confidence",route.source_confidence},
+        {"home_mars",route_leg(route.home_mars)},{"mars_venus",route_leg(route.mars_venus)},
+        {"venus_home",route_leg(route.venus_home)},
+        {"home_injection_mps",route.home_injection_mps},{"mars_capture_mps",route.mars_capture_mps},
+        {"mars_departure_mps",route.mars_departure_mps},{"home_return_capture_mps",route.home_return_capture_mps},
+        {"total_optimistic_delta_v_mps",route.total_optimistic_delta_v_mps},
+        {"venus_minimum_periapsis_m",route.flyby.minimum_periapsis_m},
+        {"venus_clearance_radius_m",route.flyby.minimum_periapsis_m-route.flyby.periapsis_margin_m},
+        {"venus_periapsis_margin_m",route.flyby.periapsis_margin_m},
+        {"launch_ut_s",route.launch_ut_s},{"return_ut_s",route.return_ut_s},
+        {"fixed_stay_s",route.fixed_stay_s},{"stay_type",route.stay_type},
+        {"leg_verification",route.leg_verification},{"excluded_costs",route.excluded_costs}};
+}
+json ephemeris_json(const Metadata& metadata){
+    return {{"force_model",metadata.force_model},{"result_label",metadata.result_label},
+        {"integrator",metadata.integrator},{"integrator_version",metadata.integrator_version},
+        {"start_ut_s",metadata.start_ut_s},{"end_ut_s",metadata.end_ut_s},
+        {"step_s",metadata.step_s},{"max_position_fit_error_m",metadata.max_position_fit_error_m},
+        {"max_velocity_fit_error_mps",metadata.max_velocity_fit_error_mps},
+        {"measured_max_position_error_m",metadata.measured_max_position_error_m},
+        {"measured_max_velocity_error_mps",metadata.measured_max_velocity_error_mps}};
+}
+void process_mission(const json& input,const std::string& id,const WorkerEmit& emit,const WorkerCancel& cancelled,
+                     const WorkerAfterRead& after_read){
+    std::string source_hash,source_confidence;bool started=false;
+    auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
+        if(!source_hash.empty()){event["snapshot_hash"]=source_hash;event["source_confidence"]=source_confidence;}emit(event);};
+    auto error=[&](const char* code,const std::string& detail){send({{"type","error"},{"code",code},{"detail",detail}});};
+    try{
+        const auto& source=input.at("source");const auto mode=source.at("mode").get<std::string>();
+        Snapshot snapshot;std::vector<AtmosphereBoundary> atmospheres;Settings settings;
+        if(mode=="synthetic_mission_fixture"){
+            snapshot=mission_fixture();atmospheres={{"sun",0},{"home",0},{"mars",0},{"venus",1000}};
+            if(source.at("expected_snapshot_hash")!=snapshot.snapshot_hash){error("source_mismatch","synthetic mission fixture hash mismatch");return;}
+        }else if(mode=="runtime_snapshot"){
+            const auto path=source.at("path").get<std::string>();
+            const auto expected=source.at("expected_snapshot_hash").get<std::string>();
+            if(path.empty()||!lower_sha256(expected))throw std::invalid_argument("runtime path and lowercase SHA-256 required");
+            std::ifstream file(path,std::ios::binary|std::ios::ate);
+            if(!file){error("source_read_failed","cannot open runtime snapshot");return;}
+            const auto length=file.tellg();constexpr std::streamoff max_bytes=16*1024*1024;
+            if(length<0){error("source_read_failed","cannot size runtime snapshot");return;}
+            if(length>max_bytes){error("source_too_large","runtime snapshot exceeds 16 MiB");return;}
+            std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+            if(!file.read(bytes.data(),length)){error("source_read_failed","cannot read complete runtime snapshot");return;}
+            if(after_read)after_read();file.clear();file.seekg(0,std::ios::end);
+            if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed during read");return;}
+            if(sha256_hex(bytes)!=expected){error("source_mismatch","exact runtime bytes hash mismatch");return;}
+            RuntimeLoad runtime;
+            try{runtime=read_runtime_snapshot(bytes,expected);}catch(const RuntimeReaderError& issue){error("invalid_source",issue.what());return;}
+            file.clear();file.seekg(0,std::ios::end);
+            if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed before acceptance");return;}
+            snapshot=std::move(runtime.snapshot);atmospheres=std::move(runtime.atmosphere_boundaries);
+        }else throw std::invalid_argument("unsupported mission source mode");
+        source_hash=snapshot.snapshot_hash;source_confidence=snapshot.confidence;
+        if(source.at("expected_frame_origin").get<std::string>()!=snapshot.frame.origin||
+           source.at("expected_frame_axes").get<std::string>()!=snapshot.frame.axes||
+           required_number(source,"expected_state_epoch_ut_s")!=*snapshot.state_epoch_ut_s)
+            throw std::invalid_argument("mission frame or epoch mismatch");
+        if(!snapshot.analysis_ready||!snapshot.frame.inertial||snapshot.frame.handedness!="right")
+            throw std::invalid_argument("mission source frame invalid");
+        mission_settings(input.at("ephemeris"),settings,*snapshot.state_epoch_ut_s);
+        const auto& m=input.at("mission");MissionSearchRequest request;auto& route=request.route;
+        for(const char* key:{"central_atmosphere_altitude_m","home_atmosphere_altitude_m","mars_atmosphere_altitude_m","venus_atmosphere_altitude_m"})
+            if(m.contains(key))throw std::invalid_argument("mission atmosphere request override forbidden");
+        route.central_body_id=m.at("central_body_id").get<std::string>();route.home_body_id=m.at("home_body_id").get<std::string>();
+        route.mars_body_id=m.at("mars_body_id").get<std::string>();route.venus_body_id=m.at("venus_body_id").get<std::string>();
+        const std::vector<std::string> roles={route.central_body_id,route.home_body_id,route.mars_body_id,route.venus_body_id};
+        for(std::size_t i=0;i<roles.size();++i){if(roles[i].empty())throw std::invalid_argument("empty mission role");
+            for(std::size_t j=0;j<i;++j)if(roles[i]==roles[j])throw std::invalid_argument("duplicate mission role");
+            if(std::none_of(snapshot.bodies.begin(),snapshot.bodies.end(),[&](const Body& body){return body.id==roles[i];}))
+                throw std::invalid_argument("unknown mission role");
+        }
+        auto atmosphere=[&](const std::string& body)->double{
+            const auto found=std::find_if(atmospheres.begin(),atmospheres.end(),[&](const AtmosphereBoundary& a){return a.body_id==body;});
+            if(found==atmospheres.end()||!std::isfinite(found->altitude_m)||found->altitude_m<0)
+                throw std::invalid_argument("missing or invalid mission atmosphere");
+            return found->altitude_m;
+        };
+        request.central_atmosphere_altitude_m=atmosphere(route.central_body_id);
+        route.home_atmosphere_altitude_m=atmosphere(route.home_body_id);
+        route.mars_atmosphere_altitude_m=atmosphere(route.mars_body_id);
+        route.venus_atmosphere_altitude_m=atmosphere(route.venus_body_id);
+        route.reference_normal=vector3(m.at("reference_normal"));
+        route.max_lambert_position_residual_m=required_number(m,"max_lambert_position_residual_m");
+        route.max_lambert_velocity_residual_mps=required_number(m,"max_lambert_velocity_residual_mps");
+        route.launch_start_ut_s=required_number(m,"launch_start_ut_s");route.launch_end_ut_s=required_number(m,"launch_end_ut_s");
+        request.launch_step_s=required_number(m,"launch_step_s");
+        route.fixed_stay_s=required_number(m,"fixed_stay_s");route.time_tolerance_s=required_number(m,"time_tolerance_s");
+        route.max_total_duration_s=required_number(m,"max_total_duration_s");
+        route.home_parking_altitude_m=required_number(m,"home_parking_altitude_m");
+        route.mars_parking_altitude_m=required_number(m,"mars_parking_altitude_m");
+        route.return_capture_altitude_m=required_number(m,"return_capture_altitude_m");
+        route.venus_safety_margin_m=required_number(m,"venus_safety_margin_m");
+        route.venus_maximum_periapsis_m=required_number(m,"venus_maximum_periapsis_m");
+        route.venus_speed_tolerance_mps=required_number(m,"venus_speed_tolerance_mps");
+        request.central_safety_margin_m=required_number(m,"central_safety_margin_m");
+        request.max_cells=required_cap(m,"max_cells",100000);request.max_routes=required_cap(m,"max_routes",128);
+        if(m.contains("return_condition")&&m.at("return_condition")!="parking_capture")
+            throw std::invalid_argument("only parking capture return supported");
+        const auto& legs=m.at("legs");if(!legs.is_array()||legs.size()!=3)throw std::invalid_argument("three mission flight grids required");
+        for(std::size_t i=0;i<3;++i)request.legs[i]=mission_flight(legs.at(i));
+        const auto launches=cells(route.launch_start_ut_s,route.launch_end_ut_s,request.launch_step_s);
+        std::size_t total=0,product=launches;
+        for(const auto& leg:request.legs){const auto n=cells(leg.min_s,leg.max_s,leg.step_s);
+            if(product>request.max_cells/n)throw std::invalid_argument("mission work cap exceeded");
+            product*=n;if(total>request.max_cells-product)throw std::invalid_argument("mission work cap exceeded");total+=product;}
+        if(route.fixed_stay_s!=5184000||route.launch_start_ut_s<settings.start_ut_s||
+           route.launch_end_ut_s+request.legs[0].max_s+route.fixed_stay_s+request.legs[1].max_s+request.legs[2].max_s>settings.end_ut_s)
+            throw std::invalid_argument("mission stay or ephemeris coverage invalid");
+        Ephemeris preflight;preflight.metadata.snapshot_hash=snapshot.snapshot_hash;
+        preflight.metadata.source_confidence=snapshot.confidence;preflight.metadata.state_epoch_ut_s=*snapshot.state_epoch_ut_s;
+        preflight.metadata.frame_origin=snapshot.frame.origin;preflight.metadata.frame_axes=snapshot.frame.axes;
+        preflight.metadata.frame_handedness=snapshot.frame.handedness;preflight.metadata.frame_inertial=snapshot.frame.inertial;
+        preflight.metadata.start_ut_s=settings.start_ut_s;preflight.metadata.end_ut_s=settings.end_ut_s;
+        for(const auto& body:snapshot.bodies)preflight.body_ids.push_back(body.id);
+        auto route_preflight=route;route_preflight.max_combinations=1;route_preflight.max_routes=1;
+        (void)assemble_routes(snapshot,preflight,route_preflight);
+        send({{"type","started"},{"total_cells",total},{"frame_origin",snapshot.frame.origin},
+            {"frame_axes",snapshot.frame.axes},{"frame_handedness",snapshot.frame.handedness},
+            {"frame_inertial",snapshot.frame.inertial},{"state_epoch_ut_s",*snapshot.state_epoch_ut_s},
+            {"coverage_start_ut_s",settings.start_ut_s},{"coverage_end_ut_s",settings.end_ut_s},
+            {"source_mode",mode},{"force_model","newtonian_point_mass"},{"units","SI"},
+            {"role_atmosphere_altitudes_m",{{"central",*request.central_atmosphere_altitude_m},
+                {"home",*route.home_atmosphere_altitude_m},{"mars",*route.mars_atmosphere_altitude_m},
+                {"venus",*route.venus_atmosphere_altitude_m}}},
+            {"fixture_description",mode=="synthetic_mission_fixture"?
+                "test-only artificial four-body circular initial states; independently integrated Newtonian ephemeris":""},
+            {"result_label","patched_conic_screened_route"},{"cancellation_guarantee","checkpoint_only"},
+            {"non_interruptible_stages",json::array({"ephemeris_integration","individual_lambert_cell"})}});
+        started=true;std::size_t sampled=0;MissionSearchResult result;
+        std::optional<Metadata> completed_ephemeris;
+        auto ranked=[&](){json rows=json::array();for(std::size_t i=0;i<result.routes.size();++i){auto row=route_json(result.routes[i]);row["rank"]=i+1;rows.push_back(std::move(row));}return rows;};
+        auto cancelled_event=[&](){json event={{"type","cancelled"},{"sampled_cells",sampled},
+            {"total_cells",total},{"ranked_routes",ranked()}};
+            if(completed_ephemeris)event["ephemeris_metadata"]=ephemeris_json(*completed_ephemeris);
+            send(std::move(event));};
+        if(cancelled()){cancelled_event();return;}
+        send({{"type","progress"},{"phase","ephemeris_precompute"},{"sampled_cells",0},{"total_cells",total}});
+        if(cancelled()){cancelled_event();return;}
+        const auto ephemeris=integrate(snapshot,settings);
+        completed_ephemeris=ephemeris.metadata;
+        if(cancelled()){cancelled_event();return;}
+        std::size_t last_progress_sampled=0,last_progress_routes=0;
+        result=search_mission(snapshot,ephemeris,request,cancelled,[&](const MissionSearchProgress& progress){
+            sampled=progress.sampled_cells;
+            const auto stride=std::max<std::size_t>(1,total/100);
+            if(progress.sampled_cells!=1&&progress.sampled_cells!=total&&
+               progress.sampled_cells-last_progress_sampled<stride&&
+               progress.retained_routes<=last_progress_routes)return;
+            send({{"type","progress"},{"phase","route_screen"},{"sampled_cells",progress.sampled_cells},
+                {"total_cells",total},{"rejected_cells",progress.rejected_cells},
+                {"considered_combinations",progress.considered_combinations},
+                {"retained_routes",progress.retained_routes}});
+            last_progress_sampled=progress.sampled_cells;last_progress_routes=progress.retained_routes;
+        });
+        for(const auto& route_result:result.routes){auto row=route_json(route_result);row["type"]="route";send(std::move(row));}
+        send({{"type",result.cancelled?"cancelled":"complete"},{"sampled_cells",result.sampled_cells},
+            {"total_cells",total},{"rejected_cells",result.rejected_cells},
+            {"considered_combinations",result.considered_combinations},
+            {"rejected_route_combinations",result.rejected_route_combinations},
+            {"peak_retained_routes",result.peak_retained_routes},{"ranked_routes",ranked()},
+            {"ephemeris_metadata",ephemeris_json(ephemeris.metadata)},
+            {"status",result.routes.empty()?"no_screened_route":"patched_conic_screened_routes_only"}});
+    }catch(const std::exception& issue){error(started?"work_failed":"invalid_request",issue.what());}
+}
 }
 
 std::string worker_candidate_id(const GridRequest& q,const DatedLegCandidate& a){
@@ -116,7 +349,11 @@ void process_start_line(const std::string& line,const WorkerEmit& emit,const Wor
     if(!input.is_object()){error("invalid_request","request must be an object");return;}
     if(input.contains("request_id")&&input["request_id"].is_string())id=input["request_id"].get<std::string>();
     if(!input.contains("protocol_version")||!input["protocol_version"].is_number_integer()||input["protocol_version"]!=1){error("unsupported_version","protocol_version must be 1");return;}
-    if(!input.contains("command")||input["command"]!="start"||id.empty()){error("invalid_request","start command and nonempty request_id required");return;}
+    if(id.empty()||!input.contains("command")||!input["command"].is_string()){
+        error("invalid_request","command and nonempty request_id required");return;}
+    if(input["command"]=="start_mission"){
+        process_mission(input,id,emit,cancelled,after_runtime_bytes_read_for_test);return;}
+    if(input["command"]!="start"){error("invalid_request","unsupported command");return;}
     bool work_started=false;
     try{
         const auto& source=input.at("source");

@@ -11,14 +11,17 @@
 #include <vector>
 namespace ksp {
 class WorkerClientError:public std::runtime_error {public:using std::runtime_error::runtime_error;};
+enum class WorkerResultKind { screened_seed, screened_route };
 class WorkerEventValidator {
 public:
-    WorkerEventValidator(std::string request_id,std::string snapshot_hash,std::string source_confidence,std::size_t max_candidates);
+    WorkerEventValidator(std::string request_id,std::string snapshot_hash,std::string source_confidence,
+                         std::size_t max_candidates,WorkerResultKind result_kind=WorkerResultKind::screened_seed);
     nlohmann::json accept_line(const std::string& line);
     bool terminal() const noexcept {return terminal_;}
 private:
     std::string request_id_,snapshot_hash_,source_confidence_;
     std::size_t max_candidates_,total_cells_=0,last_sampled_=0;
+    WorkerResultKind result_kind_;
     bool started_=false,terminal_=false;
 };
 struct ClientOptions {
@@ -26,6 +29,7 @@ struct ClientOptions {
     std::vector<std::string> arguments;
     std::chrono::milliseconds timeout{30000},cancel_grace{500};
     std::size_t max_retained_events=512,max_candidates=1000;
+    WorkerResultKind result_kind=WorkerResultKind::screened_seed;
 };
 class WorkerClient {
 public:
