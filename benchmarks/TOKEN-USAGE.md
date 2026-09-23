@@ -12,8 +12,8 @@ Recorded runtime counters, not an invoice or weekly-limit estimate. Model attrib
 | gpt-6-astra | medium | 1 | 206571 | 2700032 | 15499 | 852 | 2922102 |
 | gpt-6-sol | high | 3 | 848773 | 28140800 | 100951 | 50530 | 29090524 |
 | gpt-6-sol | medium | 2 | 1294649 | 107022464 | 430422 | 117337 | 108747535 |
-| gpt-6-sol | xhigh | 1 | 2686380 | 242754048 | 711892 | 306133 | 246152320 |
+| gpt-6-sol | xhigh | 1 | 2689331 | 243199104 | 713405 | 306382 | 246601840 |
 
-Captured UTC: 2026-09-23T05:33:55.8185568Z
+Captured UTC: 2026-09-23T06:19:04.5355088Z
 
 See token-usage.csv for per-session roles, source paths and each counter timestamp. Refresh next turn to include the coordinator final response.
