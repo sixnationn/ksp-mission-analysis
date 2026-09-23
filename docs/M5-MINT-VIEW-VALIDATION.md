@@ -53,3 +53,9 @@ steps. The guide now includes repository clone, .NET SDK check, Linux build and
 copy commands using the disposable Proton KSP copy's Managed directory. This
 Linux command follows the project build contract and Microsoft's SDK
 documentation; it has not yet been run on a Linux KSP installation.
+
+Commit `f5f3d19` passed all six jobs in
+[CI run 35911390024](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35911390024).
+The uploaded `ksp-desktop-ubuntu-tester` bundle contains that source commit and
+the updated exporter guide. CI confirms compilation and tests on Ubuntu and
+Windows; it does not show rendered Mint behavior or an in-game capture.

@@ -280,3 +280,13 @@ The `milestones/m5-updates.json` checkpoint was captured at 13:50:05 UTC on 23 S
 | gpt-6-sol | max | 3,525,297 | 3,484,928 | 40,369 | 18,028 | 10,483 |
 
 Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Linux Mint zoom and Ubuntu exporter guide checkpoint
+
+The `milestones/m5-zoom-exporter-ubuntu.json` checkpoint was captured at 19:49:30 UTC on 23 September 2026, against the prior milestone's end snapshot, copied to `milestones/m5-zoom-exporter-ubuntu-start.json`, from 13:50:05. This contiguous interval includes the preceding final response, tester screenshot review, depth-clipping fix, Ubuntu exporter instructions, local checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | max | 8,463,765 | 8,236,928 | 226,837 | 20,590 | 12,081 |
+
+Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-23T19:49:30.5274361Z",
+  "generated_at_utc": "2026-09-23T13:50:05.6600907Z",
   "scope": "Registered task sessions only; active response is incomplete until next refresh.",
   "accounting": "Input includes cached input. Reasoning is a subset of output. Total is input plus output; do not add subsets again. Uncached input includes any cache-write input; cache writes are also reported separately.",
   "limitations": "Recorded runtime counters, not an invoice or weekly-limit estimate. Model attribution follows turn_context. No timing or quality claim follows from token counts alone.",
@@ -45,13 +45,13 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "max",
       "sessions": 1,
-      "input_tokens": 24235217,
-      "cached_input_tokens": 23724288,
+      "input_tokens": 15771452,
+      "cached_input_tokens": 15487360,
       "cache_write_input_tokens": 0,
-      "output_tokens": 80854,
-      "reasoning_output_tokens": 48261,
-      "total_tokens": 24316071,
-      "uncached_input_tokens": 510929
+      "output_tokens": 60264,
+      "reasoning_output_tokens": 36180,
+      "total_tokens": 15831716,
+      "uncached_input_tokens": 284092
     },
     {
       "model": "gpt-6-sol",
@@ -130,14 +130,14 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "max",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
-      "as_of": "2026-09-23T19:49:07.301Z",
-      "input_tokens": 24235217,
-      "cached_input_tokens": 23724288,
+      "as_of": "2026-09-23T13:49:50.473Z",
+      "input_tokens": 15771452,
+      "cached_input_tokens": 15487360,
       "cache_write_input_tokens": 0,
-      "output_tokens": 80854,
-      "reasoning_output_tokens": 48261,
-      "total_tokens": 24316071,
-      "uncached_input_tokens": 510929
+      "output_tokens": 60264,
+      "reasoning_output_tokens": 36180,
+      "total_tokens": 15831716,
+      "uncached_input_tokens": 284092
     },
     {
       "role": "M0/M1 coordinator",
