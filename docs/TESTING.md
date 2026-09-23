@@ -8,7 +8,7 @@ are dynamic **development test bundles**, not standalone installers.
 
 ## Get a matching build
 
-On the public repository's **Actions → Build and check** page, choose a
+On the public repository's [Actions → Build and check](https://github.com/sixnationn/ksp-mission-analysis/actions/workflows/build.yml) page, choose a
 successful run for `main` and download either `ksp-desktop-ubuntu-tester` or
 `ksp-desktop-windows-tester` from its artifacts. Extract the ZIP. Keep
 `ksp_desktop` and `ksp_worker` (or both `.exe` files) in the same directory;
@@ -18,7 +18,7 @@ machine's dynamic library scan. Artifacts are retained for seven days.
 
 The Ubuntu bundle needs GTK 4/gtkmm, libepoxy, OpenGL and the C++ runtime on
 the test machine. The approved Ubuntu package list and build commands are in
-[dependencies](DEPENDENCIES.md) and the CI workflow. The Windows bundle must
+[dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/DEPENDENCIES.md) and the CI workflow. The Windows bundle must
 run with the MSYS2 **UCRT64** runtime packages listed in that workflow; open
 the UCRT64 shell, install those listed packages if absent, and navigate to the
 extracted directory. The dependency record is evidence from the build runner,
@@ -62,7 +62,7 @@ synthetic or runtime-shaped data and do not validate a loaded KSP installation.
 If you own KSP 1.12.5 and want to test the real import path, use a separate
 disposable copy of the game. The required JNSQ, Reborn Real, Principia and
 support-mod versions, plus known load gaps, are recorded in
-[game runtime dependencies](GAME-RUNTIME-DEPENDENCIES.md). The KSP exporter
+[game runtime dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/GAME-RUNTIME-DEPENDENCIES.md). The KSP exporter
 has compiled but **has not yet been proven in a loaded game**; a failed
 capture is useful test evidence. The exporter build has been checked on
 Windows only. Build it there with .NET 10, the .NET Framework reference

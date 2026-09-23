@@ -69,12 +69,12 @@ jobs:
           cmake --build build/desktop-ci --target ksp_desktop ksp_worker
           cmake --build build/desktop-ci
           ctest --test-dir build/desktop-ci --output-on-failure
+      - name: Stage development-test bundle
+        run: bash scripts/stage-m5-tester.sh ubuntu build/desktop-ci artifacts/m5/ubuntu
       - uses: actions/upload-artifact@v7
         with:
-          name: ksp-desktop-ubuntu-build-check
-          path: |
-            build/desktop-ci/ksp_desktop
-            build/desktop-ci/ksp_worker
+          name: ksp-desktop-ubuntu-tester
+          path: artifacts/m5/ubuntu/
           if-no-files-found: error
           retention-days: 7
 
@@ -102,11 +102,12 @@ jobs:
           cmake --build build/desktop-ci --target ksp_desktop ksp_worker
           cmake --build build/desktop-ci
           ctest --test-dir build/desktop-ci --output-on-failure
+      - name: Stage development-test bundle
+        shell: msys2 {0}
+        run: bash scripts/stage-m5-tester.sh windows build/desktop-ci artifacts/m5/windows
       - uses: actions/upload-artifact@v7
         with:
-          name: ksp-desktop-windows-build-check
-          path: |
-            build/desktop-ci/ksp_desktop.exe
-            build/desktop-ci/ksp_worker.exe
+          name: ksp-desktop-windows-tester
+          path: artifacts/m5/windows/
           if-no-files-found: error
           retention-days: 7
