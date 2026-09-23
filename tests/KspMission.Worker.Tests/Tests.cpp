@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <vector>
 using namespace ksp;
@@ -360,6 +361,55 @@ void mission_runtime_mode(){
     check(!has(run(bad.dump()),"started"),"runtime mission malformed exact bytes reject");
     std::filesystem::remove(path);
 }
+void mission_cache_protocol(){
+    std::random_device random;
+    const auto directory=std::filesystem::temp_directory_path()/
+        ("ksp-worker-cache-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(random()));
+    check(std::filesystem::create_directory(directory),"unique worker cache test directory");
+    const auto cache=directory/"planetary.bin";
+    auto q=mission_request();q["ephemeris_cache"]={{"path",cache.string()}};
+    auto created=run(q.dump());
+    check(created.back()["type"]=="complete"&&created.back().value("ephemeris_cache_status","")=="created"&&
+        std::filesystem::is_regular_file(cache),"fresh mission cache created");
+    std::ifstream original_file(cache,std::ios::binary);const std::string original{std::istreambuf_iterator<char>(original_file),std::istreambuf_iterator<char>()};
+    original_file.close();
+    check(!original.empty(),"mission cache bytes captured");
+    const auto uncached=run(mission_request().dump());
+    check(uncached.back()["type"]=="complete"&&
+        uncached.back()["ephemeris_metadata"]==created.back()["ephemeris_metadata"]&&
+        uncached.back()["ranked_routes"]==created.back()["ranked_routes"],"cache creation matches no-cache numerical output");
+    auto hit=run(q.dump());check(hit.back()["type"]=="complete"&&hit.back().value("ephemeris_cache_status","")=="hit","mission cache hit");
+    std::ifstream hit_file(cache,std::ios::binary);const std::string hit_bytes{std::istreambuf_iterator<char>(hit_file),std::istreambuf_iterator<char>()};
+    hit_file.close();
+    check(hit_bytes==original,"hit leaves cache bytes unchanged");
+    check(hit.front()["snapshot_hash"]==created.front()["snapshot_hash"]&&
+        hit.front()["source_confidence"]==created.front()["source_confidence"],"cache hit preserves source envelope");
+    check(hit.back()["ephemeris_metadata"]==created.back()["ephemeris_metadata"]&&
+        hit.back()["ranked_routes"]==created.back()["ranked_routes"],"cache hit preserves ephemeris and route results");
+    auto invalid=q;invalid["ephemeris_cache"]={{"path",""}};auto out=run(invalid.dump());
+    check(out.back()["code"]=="invalid_request"&&!has(out,"started"),"empty cache path rejects before started");
+    invalid=q;invalid["ephemeris_cache"]=json::array();out=run(invalid.dump());
+    check(out.back()["code"]=="invalid_request"&&!has(out,"started"),"cache object shape rejects");
+    invalid=q;invalid["ephemeris_cache"]["other"]=true;out=run(invalid.dump());
+    check(out.back()["code"]=="invalid_request"&&!has(out,"started"),"cache unsupported field rejects");
+    invalid=q;invalid["ephemeris"]["step_s"]=5000.0;out=run(invalid.dump());
+    check(out.back()["code"]=="cache_rejected"&&has(out,"started")&&!has(out,"complete")&&!has(out,"route"),"stale step rejects cache without fallback");
+    invalid=q;invalid["source"]["expected_snapshot_hash"]="wrong";out=run(invalid.dump());
+    check(out.back()["code"]=="source_mismatch"&&!has(out,"started"),"source rejection precedes cache work");
+    const auto corrupt=directory/"corrupt.bin";{std::ofstream file(corrupt,std::ios::binary);file.write(original.data(),static_cast<std::streamsize>(original.size()-1));}
+    invalid=q;invalid["ephemeris_cache"]["path"]=corrupt.string();out=run(invalid.dump());
+    check(out.back()["code"]=="cache_rejected"&&!has(out,"complete")&&!has(out,"route"),"truncated cache rejected without fallback");
+    const auto unwritable=directory/"missing-parent"/"cache.bin";invalid=q;invalid["ephemeris_cache"]["path"]=unwritable.string();out=run(invalid.dump());
+    check(out.back()["code"]=="cache_write_failed"&&!has(out,"complete")&&!has(out,"route")&&
+        !std::filesystem::exists(unwritable),"cache publish failure stops search");
+    const auto existing_directory=directory/"existing-entry";check(std::filesystem::create_directory(existing_directory),"existing directory test entry");
+    invalid=q;invalid["ephemeris_cache"]["path"]=existing_directory.string();out=run(invalid.dump());
+    check(out.back()["code"]=="cache_rejected"&&!has(out,"complete")&&!has(out,"route"),"existing nonregular cache entry rejected before integration");
+    const auto cancelled_path=directory/"cancelled.bin";invalid=q;invalid["ephemeris_cache"]["path"]=cancelled_path.string();
+    out=run(invalid.dump(),[]{return true;});
+    check(out.back()["type"]=="cancelled"&&!std::filesystem::exists(cancelled_path)&&!has(out,"route"),"prework cancel creates no cache");
+    std::filesystem::remove(corrupt);std::filesystem::remove(cache);std::filesystem::remove(existing_directory);std::filesystem::remove(directory);
+}
 namespace eval_fixture {
 constexpr double stay=5184000,arrival=1000000,departure=arrival+stay,encounter=departure+500000,home_return=departure+1000000;
 Snapshot source(){
@@ -650,4 +700,4 @@ void evaluation_runtime_round_trip(){
     std::filesystem::remove(path);
 }
 }
-int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();evaluation_protocol_failures();evaluation_runtime_round_trip();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();mission_cache_protocol();evaluation_protocol_failures();evaluation_runtime_round_trip();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

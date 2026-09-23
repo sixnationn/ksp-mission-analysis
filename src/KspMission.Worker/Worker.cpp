@@ -4,6 +4,7 @@
 #include "MissionSearch.hpp"
 #include "RuntimeReader.hpp"
 #include "RouteEvaluate.hpp"
+#include "EphemerisCache.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -397,10 +398,18 @@ void process_evaluation(const json& input,const std::string& id,const WorkerEmit
 void process_mission(const json& input,const std::string& id,const WorkerEmit& emit,const WorkerCancel& cancelled,
                      const WorkerAfterRead& after_read){
     std::string source_hash,source_confidence;bool started=false;
+    std::optional<std::filesystem::path> cache_path;
+    std::optional<std::string> cache_status;
     auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
         if(!source_hash.empty()){event["snapshot_hash"]=source_hash;event["source_confidence"]=source_confidence;}emit(event);};
     auto error=[&](const char* code,const std::string& detail){send({{"type","error"},{"code",code},{"detail",detail}});};
     try{
+        if(input.contains("ephemeris_cache")){
+            const auto& cache=input.at("ephemeris_cache");
+            if(!cache.is_object()||cache.size()!=1||!cache.contains("path")||!cache.at("path").is_string()||
+               cache.at("path").get<std::string>().empty())throw std::invalid_argument("ephemeris_cache requires only a nonempty path");
+            cache_path=std::filesystem::path(cache.at("path").get<std::string>());
+        }
         const auto& source=input.at("source");const auto mode=source.at("mode").get<std::string>();
         Snapshot snapshot;std::vector<AtmosphereBoundary> atmospheres;Settings settings;
         if(mode=="synthetic_mission_fixture"){
@@ -508,11 +517,31 @@ void process_mission(const json& input,const std::string& id,const WorkerEmit& e
         auto cancelled_event=[&](){json event={{"type","cancelled"},{"sampled_cells",sampled},
             {"total_cells",total},{"ranked_routes",ranked()}};
             if(completed_ephemeris)event["ephemeris_metadata"]=ephemeris_json(*completed_ephemeris);
+            if(cache_status)event["ephemeris_cache_status"]=*cache_status;
             send(std::move(event));};
         if(cancelled()){cancelled_event();return;}
-        send({{"type","progress"},{"phase","ephemeris_precompute"},{"sampled_cells",0},{"total_cells",total}});
+        send({{"type","progress"},{"phase",cache_path?"ephemeris_cache":"ephemeris_precompute"},{"sampled_cells",0},{"total_cells",total}});
         if(cancelled()){cancelled_event();return;}
-        const auto ephemeris=integrate(snapshot,settings);
+        Ephemeris ephemeris;
+        if(cache_path){
+            std::error_code inspection_error;
+            const auto cache_entry=std::filesystem::symlink_status(*cache_path,inspection_error);
+            const bool absent=cache_entry.type()==std::filesystem::file_type::not_found;
+            if(inspection_error&&!absent){error("cache_rejected",inspection_error.message());return;}
+            if(!absent){
+                if(cache_entry.type()!=std::filesystem::file_type::regular){
+                    error("cache_rejected","cache path is not a regular file");return;}
+                try{ephemeris=load_ephemeris_cache(*cache_path,snapshot,settings);}
+                catch(const std::exception& issue){error("cache_rejected",issue.what());return;}
+                cache_status="hit";
+            }else{
+                ephemeris=integrate(snapshot,settings);
+                if(cancelled()){cancelled_event();return;}
+                try{save_ephemeris_cache(ephemeris,snapshot,settings,*cache_path);}
+                catch(const std::exception& issue){error("cache_write_failed",issue.what());return;}
+                cache_status="created";
+            }
+        }else ephemeris=integrate(snapshot,settings);
         completed_ephemeris=ephemeris.metadata;
         if(cancelled()){cancelled_event();return;}
         std::size_t last_progress_sampled=0,last_progress_routes=0;
@@ -529,13 +558,15 @@ void process_mission(const json& input,const std::string& id,const WorkerEmit& e
             last_progress_sampled=progress.sampled_cells;last_progress_routes=progress.retained_routes;
         });
         for(const auto& route_result:result.routes){auto row=route_json(route_result);row["type"]="route";send(std::move(row));}
-        send({{"type",result.cancelled?"cancelled":"complete"},{"sampled_cells",result.sampled_cells},
+        json terminal={{"type",result.cancelled?"cancelled":"complete"},{"sampled_cells",result.sampled_cells},
             {"total_cells",total},{"rejected_cells",result.rejected_cells},
             {"considered_combinations",result.considered_combinations},
             {"rejected_route_combinations",result.rejected_route_combinations},
             {"peak_retained_routes",result.peak_retained_routes},{"ranked_routes",ranked()},
             {"ephemeris_metadata",ephemeris_json(ephemeris.metadata)},
-            {"status",result.routes.empty()?"no_screened_route":"patched_conic_screened_routes_only"}});
+            {"status",result.routes.empty()?"no_screened_route":"patched_conic_screened_routes_only"}};
+        if(cache_status)terminal["ephemeris_cache_status"]=*cache_status;
+        send(std::move(terminal));
     }catch(const std::exception& issue){error(started?"work_failed":"invalid_request",issue.what());}
 }
 }
