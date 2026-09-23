@@ -23,7 +23,12 @@ for required in "$desktop" "$worker" "$guide"; do
   fi
 done
 command -v ldd >/dev/null || { echo 'ldd is required for dependency inspection' >&2; exit 1; }
-commit=$(git rev-parse --verify HEAD)
+if [[ -n ${GITHUB_SHA:-} ]]; then
+  commit=$GITHUB_SHA
+else
+  command -v git >/dev/null || { echo 'git or GITHUB_SHA is required for source identity' >&2; exit 1; }
+  commit=$(git rev-parse --verify HEAD)
+fi
 if [[ ! $commit =~ ^[0-9a-f]{40}$ ]]; then
   echo 'source commit identifier unavailable' >&2
   exit 1

@@ -27,7 +27,9 @@ to launch, include its error and the dependency record in the report.
 
 ## First visual test, no game required
 
-From the extracted directory, run the platform's executable in a terminal:
+GitHub artifact ZIP extraction may clear Unix executable permissions. On
+Ubuntu, run `chmod +x ksp_desktop ksp_worker` once after extraction. From the
+extracted directory, run the platform's executable in a terminal:
 
 ```text
 ./ksp_desktop
