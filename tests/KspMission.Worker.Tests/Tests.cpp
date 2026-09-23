@@ -2,6 +2,7 @@
 #include "RuntimeReader.hpp"
 #include "MissionSearch.hpp"
 #include "RouteEvaluate.hpp"
+#include "EvaluationReport.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -550,6 +551,9 @@ void evaluation_runtime_round_trip(){
     const auto events=run(q.dump());
     check(has(events,"started")&&has(events,"progress")&&has(events,"complete")&&
           !has(events,"error")&&!has(events,"cancelled"),"evaluation positive lifecycle");
+    const auto report=compose_fixed_evaluation_report(bytes,hash,q,events);
+    check(report.at("report_kind")=="fixed_impulse_evaluation"&&
+          report.at("events").size()==events.size(),"worker-produced evaluation report composes");
     const auto& complete=events.back();
     check(complete["result_label"]=="independent_nbody_fixed_impulse_checkpointed_only"&&
           complete["route_seed_evidence_revalidated"]==false&&

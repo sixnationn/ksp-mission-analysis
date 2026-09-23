@@ -2,6 +2,7 @@
 #include "RuntimeReader.hpp"
 #include "WorkerClient.hpp"
 #include "StudyReport.hpp"
+#include "EvaluationReport.hpp"
 #include <epoxy/gl.h>
 #include <glibmm/ustring.h>
 #include <sigc++/sigc++.h>
@@ -227,7 +228,8 @@ public:
         root_(Gtk::Orientation::VERTICAL,0),main_(Gtk::Orientation::HORIZONTAL,0),left_(Gtk::Orientation::VERTICAL,10),
         right_(Gtk::Orientation::VERTICAL,10),center_(Gtk::Orientation::VERTICAL,0),bottom_(Gtk::Orientation::VERTICAL,8),
         selection_("Selected: Haven"),status_("Synthetic visualization ready · camera changes do not affect the trajectory"),
-        import_("Import runtime JSON"),search_("Screen runtime mission"),cancel_("Cancel worker"),export_("Save study report"),
+        import_("Import runtime JSON"),search_("Screen runtime mission"),evaluate_("Evaluate fixed trial"),
+        cancel_("Cancel worker"),export_("Save report"),
         worker_path_(std::move(worker_path)){
         set_title("KSP Mission Analysis · Synthetic study");set_default_size(1440,880);
         install_css();set_child(root_);
@@ -251,16 +253,17 @@ private:
     Gtk::Box body_rows_{Gtk::Orientation::VERTICAL,7},fields_{Gtk::Orientation::VERTICAL,1};
     Gtk::Box form_{Gtk::Orientation::VERTICAL,5},route_rows_{Gtk::Orientation::VERTICAL,4};
     Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_,worker_status_;
-    Gtk::Entry path_,hash_;Gtk::Button import_,search_,cancel_,export_;
+    Gtk::Entry path_,hash_;Gtk::Button import_,search_,evaluate_,cancel_,export_;
     Gtk::ProgressBar progress_;
     std::map<std::string,Gtk::Entry*> inputs_;
     WorkerClient worker_;
     sigc::connection poll_connection_;
     std::optional<RuntimeLoad> runtime_source_;
     std::optional<json> submitted_request_,terminal_event_;
+    std::vector<json> evaluation_events_;
     std::string worker_path_,loaded_path_,loaded_hash_,request_id_;
     std::size_t request_sequence_=0;
-    bool pending_close_=false,terminal_seen_=false;
+    bool pending_close_=false,terminal_seen_=false,active_evaluation_=false;
     std::string source_details_="Synthetic M2 fixture · no KSP or Principia runtime import";
     bool runtime_loaded_=false;
     void show_import_error(const std::string& detail){
@@ -280,14 +283,16 @@ private:
                 "\nPrincipia state source · observed, not compared to installed game";
             runtime_source_=loaded;snapshot_=loaded.snapshot;ephemeris_=std::move(prepared.preview);
             loaded_path_=filename;loaded_hash_=expected;
-            submitted_request_.reset();terminal_event_.reset();export_.set_sensitive(false);
+            submitted_request_.reset();terminal_event_.reset();evaluation_events_.clear();
+            active_evaluation_=false;export_.set_sensitive(false);
             source_details_=details;runtime_loaded_=true;view_.reload();refresh_source();select(snapshot_.bodies.size()>1?1:0);
             for(const auto& key:{"central","home","mars","venus","leg1_min","leg1_max","leg2_min","leg2_max",
                 "leg3_min","leg3_max","ephemeris_end","home_parking","mars_parking","home_capture",
                 "venus_max_periapsis","venus_speed_tolerance","max_duration"})inputs_.at(key)->set_text("");
             inputs_.at("launch_start")->set_text(fixed(loaded.capture_ut_s,0));
             inputs_.at("launch_end")->set_text(fixed(loaded.capture_ut_s,0));
-            search_.set_sensitive(true);cancel_.set_sensitive(false);progress_.set_fraction(0);
+            inputs_.at("trial_path")->set_text("");
+            search_.set_sensitive(true);evaluate_.set_sensitive(true);cancel_.set_sensitive(false);progress_.set_fraction(0);
             while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
             route_rows_.append(*label("No ranked screened routes for this source.","small"));
             worker_status_.set_text("Runtime snapshot ready · configure exact roles and SI grids to screen");
@@ -383,13 +388,14 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         auto* contents=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,12);
         contents->append(fields_);contents->append(form_);scroll->set_child(*contents);
         build_mission_form();
-        right_.append(*label("Screened patched-conic routes only · independent Newtonian ephemeris · SI / UT","small"));
-        search_.set_sensitive(false);export_.set_sensitive(false);
+        right_.append(*label("Screened routes or a supplied fixed-impulse checkpoint trial · independent Newtonian model · SI / UT","small"));
+        search_.set_sensitive(false);evaluate_.set_sensitive(false);export_.set_sensitive(false);
         cancel_.set_sensitive(false);
         search_.signal_clicked().connect([this]{start_mission();});
+        evaluate_.signal_clicked().connect([this]{start_evaluation();});
         cancel_.signal_clicked().connect([this]{worker_.cancel();worker_status_.set_text("Cancellation requested · waiting for worker checkpoint");});
         export_.signal_clicked().connect([this]{save_report();});
-        right_.append(search_);right_.append(cancel_);right_.append(export_);
+        right_.append(search_);right_.append(evaluate_);right_.append(cancel_);right_.append(export_);
     }
     void build_bottom(){
         bottom_.add_css_class("bottom");bottom_.append(*label("CANDIDATES & WORKER","eyebrow"));
@@ -435,7 +441,8 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         add_input("max_cells","Prospective Lambert cell cap (≤100000)","100000");
         add_input("max_routes","Retained route cap (≤128)","50");
         add_input("timeout","Worker deadline (s)","300");
-        add_input("report_path","Study report output path (JSON)");
+        add_input("trial_path","Fixed-impulse trial JSON path (advanced)");
+        add_input("report_path","Report output path (JSON)");
         form_.append(*label("Parking-orbit stay: exactly 5,184,000 SI s · return: parking capture","small"));
     }
     std::string field(const std::string& name) const{return inputs_.at(name)->get_text().raw();}
@@ -531,12 +538,61 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             options.timeout=std::chrono::seconds(positive_integer("timeout",1800));
             options.cancel_grace=std::chrono::milliseconds(750);
             if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
-            submitted_request_=request;terminal_event_.reset();export_.set_sensitive(false);
-            terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);cancel_.set_sensitive(true);
+            submitted_request_=request;terminal_event_.reset();evaluation_events_.clear();
+            active_evaluation_=false;export_.set_sensitive(false);
+            terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);
+            evaluate_.set_sensitive(false);cancel_.set_sensitive(true);
             import_.set_sensitive(false);worker_status_.set_text("Worker starting · "+request_id_);
             while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
             route_rows_.append(*label("Screening runtime mission · no final routes yet","small"));
         }catch(const std::exception& error){worker_status_.set_text(std::string("Mission request rejected: ")+error.what());}
+    }
+    void start_evaluation(){
+        try{
+            if(worker_.running())throw std::runtime_error("Worker is already running");
+            if(!runtime_loaded_||!runtime_source_)throw std::runtime_error("Import a runtime snapshot first");
+            if(path_.get_text().raw()!=loaded_path_||hash_.get_text().raw()!=loaded_hash_)
+                throw std::runtime_error("Source path or hash changed; import the snapshot again");
+            const auto trial_path=field("trial_path");
+            if(trial_path.empty())throw std::runtime_error("Enter a fixed-impulse trial JSON path");
+            std::ifstream file(trial_path,std::ios::binary|std::ios::ate);
+            if(!file)throw std::runtime_error("Fixed-impulse trial JSON cannot be opened");
+            const auto length=file.tellg();
+            if(length<=0||length>1024*1024)throw std::runtime_error("Fixed-impulse trial JSON must be 1 MiB or less");
+            std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+            if(!file.read(bytes.data(),length))throw std::runtime_error("Fixed-impulse trial JSON read incomplete");
+            const auto trial=json::parse(bytes);
+            if(!trial.is_object()||trial.contains("source")||trial.contains("source_confidence")||
+               trial.contains("atmosphere_boundaries"))
+                throw std::runtime_error("Trial must be an object without a source or atmosphere override");
+            if(!trial.contains("route_seed")||!trial.at("route_seed").is_object()||
+               trial.at("route_seed").value("snapshot_hash",std::string{})!=loaded_hash_||
+               trial.at("route_seed").value("source_confidence",std::string{})!="runtime_observed_uncompared")
+                throw std::runtime_error("Trial route seed must match the loaded runtime source");
+            request_id_="desktop-eval-"+std::to_string(++request_sequence_);
+            const json request={{"protocol_version",1},{"command","evaluate_route"},{"request_id",request_id_},
+                {"source",{{"mode","runtime_snapshot"},{"path",loaded_path_},
+                    {"expected_snapshot_hash",loaded_hash_},{"expected_frame_origin",snapshot_.frame.origin},
+                    {"expected_frame_axes",snapshot_.frame.axes},
+                    {"expected_state_epoch_ut_s",*snapshot_.state_epoch_ut_s}}},{"trial",trial}};
+            const auto request_line=request.dump();
+            if(request_line.size()>1024*1024)throw std::runtime_error("Fixed-impulse worker request exceeds 1 MiB");
+            ClientOptions options;options.executable_path=worker_path_;options.request_line=request_line;
+            options.request_id=request_id_;options.expected_snapshot_hash=loaded_hash_;
+            options.expected_source_confidence="runtime_observed_uncompared";
+            options.result_kind=WorkerResultKind::fixed_impulse_evaluation;
+            options.max_retained_events=32;
+            options.timeout=std::chrono::seconds(positive_integer("timeout",1800));
+            options.cancel_grace=std::chrono::milliseconds(750);
+            if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
+            active_evaluation_=true;submitted_request_=request;terminal_event_.reset();
+            evaluation_events_.clear();export_.set_sensitive(false);
+            terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);
+            evaluate_.set_sensitive(false);cancel_.set_sensitive(true);import_.set_sensitive(false);
+            while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+            route_rows_.append(*label("Evaluating supplied fixed impulses · checkpointed result pending","small"));
+            worker_status_.set_text("Fixed-impulse worker starting · "+request_id_);
+        }catch(const std::exception& error){worker_status_.set_text(std::string("Fixed trial rejected: ")+error.what()+" · previous result retained");}
     }
     void show_ranked(const json& event){
         while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
@@ -562,6 +618,34 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             route_rows_.append(*label(text,"small"));
         }
     }
+    void show_evaluation(const json& event){
+        while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+        const auto& strict=event.at("strict");
+        route_rows_.append(*label("Checkpointed fixed-impulse trial · "+event.at("result_label").get<std::string>()+
+            "\nCharged total "+fixed(event.at("total_charged_delta_v_mps").get<double>(),3)+
+            " m/s · route seed revalidated: false · continuous Mars stay verified: false","small"));
+        const auto& burns=strict.at("burns"),&checks=strict.at("checkpoints");
+        for(std::size_t i=0;i<4;++i){
+            const auto& burn=burns.at(i),&check=checks.at(i);
+            route_rows_.append(*label(check.at("name").get<std::string>()+" · UT "+
+                fixed(burn.at("ut_s").get<double>(),0)+" s · burn "+
+                fixed(burn.at("magnitude_mps").get<double>(),3)+" m/s"+
+                "\nResiduals: position "+fixed(check.at("position_error_m").get<double>(),3)+
+                " m · velocity "+fixed(check.at("velocity_error_mps").get<double>(),6)+
+                " m/s · parking radius "+fixed(check.at("parking_radius_error_m").get<double>(),3)+" m","small"));
+        }
+        const auto& venus=strict.at("venus"),&mars=strict.at("mars_radius");
+        const auto& disagreement=event.at("disagreement");
+        route_rows_.append(*label("Venus event UT "+fixed(venus.at("ut_s").get<double>(),0)+
+            " s · distance "+fixed(venus.at("distance_m").get<double>(),2)+
+            " m · clearance "+fixed(venus.at("clearance_m").get<double>(),2)+
+            " m · safety margin "+fixed(venus.at("safety_margin_m").get<double>(),2)+
+            " m\nMars stay radius observed "+fixed(mars.at("observed_minimum_m").get<double>(),2)+
+            "–"+fixed(mars.at("observed_maximum_m").get<double>(),2)+" m"+
+            " · coarse/strict max checkpoint disagreement "+
+            fixed(disagreement.at("maximum_checkpoint_position_m").get<double>(),3)+" m / "+
+            fixed(disagreement.at("maximum_checkpoint_velocity_mps").get<double>(),6)+" m/s","small"));
+    }
     void save_report(){
         try{
             if(!submitted_request_||!terminal_event_||worker_.running())
@@ -574,29 +658,63 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             if(length<0||length>16*1024*1024)throw std::runtime_error("Runtime source size invalid");
             std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
             if(!file.read(bytes.data(),length))throw std::runtime_error("Runtime source read incomplete");
-            const auto report=compose_runtime_study_report(bytes,loaded_hash_,*submitted_request_,*terminal_event_);
-            save_study_report(report,std::filesystem::path(destination));
-            worker_status_.set_text("Saved historical screened study · "+destination);
-        }catch(const std::exception& error){worker_status_.set_text(std::string("Study report rejected: ")+error.what());}
+            if(active_evaluation_){
+                const auto report=compose_fixed_evaluation_report(bytes,loaded_hash_,
+                    *submitted_request_,evaluation_events_);
+                save_fixed_evaluation_report(report,std::filesystem::path(destination));
+                worker_status_.set_text("Saved checkpointed fixed-impulse trial · "+destination);
+            }else{
+                const auto report=compose_runtime_study_report(bytes,loaded_hash_,
+                    *submitted_request_,*terminal_event_);
+                save_study_report(report,std::filesystem::path(destination));
+                worker_status_.set_text("Saved historical screened study · "+destination);
+            }
+        }catch(const std::exception& error){worker_status_.set_text(std::string("Report rejected: ")+error.what());}
     }
     bool poll_worker(){
         for(const auto& event:worker_.drain()){
             const auto type=event.value("type",std::string{});
-            if(type=="started")worker_status_.set_text("Worker started · "+event.value("source_mode",std::string{})+
-                " · independent "+event.value("force_model",std::string{})+" · SI / UT");
+            if(active_evaluation_&&type!="client_error")evaluation_events_.push_back(event);
+            if(type=="started")worker_status_.set_text(active_evaluation_?
+                "Fixed-impulse evaluation started · checkpointed independent n-body · SI / UT":
+                "Worker started · "+event.value("source_mode",std::string{})+
+                    " · independent "+event.value("force_model",std::string{})+" · SI / UT");
             else if(type=="progress"){
-                const auto sampled=event.value("sampled_cells",std::size_t{0}),total=event.value("total_cells",std::size_t{1});
-                progress_.set_fraction(total?static_cast<double>(sampled)/total:0);
-                worker_status_.set_text("Screening "+std::to_string(sampled)+" / "+std::to_string(total)+
-                    " Lambert cells · "+event.value("phase",std::string("route_screen")));
+                if(active_evaluation_){
+                    const auto done=event.at("completed_phases").get<std::size_t>();
+                    const auto total=event.at("total_phases").get<std::size_t>();
+                    progress_.set_fraction(total?static_cast<double>(done)/total:0);
+                    worker_status_.set_text("Fixed-impulse evaluation "+std::to_string(done)+" / "+
+                        std::to_string(total)+" phase · numerical stage may run until deadline");
+                }else{
+                    const auto sampled=event.value("sampled_cells",std::size_t{0}),total=event.value("total_cells",std::size_t{1});
+                    progress_.set_fraction(total?static_cast<double>(sampled)/total:0);
+                    worker_status_.set_text("Screening "+std::to_string(sampled)+" / "+std::to_string(total)+
+                        " Lambert cells · "+event.value("phase",std::string("route_screen")));
+                }
             }else if(type=="route")worker_status_.set_text("Provisional screened route received · final ranking pending");
             else if(type=="complete"||type=="cancelled"){
-                terminal_seen_=true;show_ranked(event);cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
-                terminal_event_=event;export_.set_sensitive(event.contains("ephemeris_metadata"));
-                import_.set_sensitive(true);worker_status_.set_text(type=="cancelled"?
-                    "Cancelled · accepted partial screened routes shown":"Completed · final ranked screened routes shown");
+                terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
+                evaluate_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
+                if(active_evaluation_){
+                    while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+                    if(type=="complete"){
+                        show_evaluation(event);terminal_event_=event;export_.set_sensitive(true);
+                        worker_status_.set_text("Completed · checkpointed fixed-impulse trial shown");
+                    }else{
+                        route_rows_.append(*label("Fixed-impulse trial cancelled · no completed result","small"));
+                        terminal_event_.reset();export_.set_sensitive(false);
+                        worker_status_.set_text("Fixed-impulse trial cancelled · no report available");
+                    }
+                }else{
+                    show_ranked(event);terminal_event_=event;
+                    export_.set_sensitive(event.contains("ephemeris_metadata"));
+                    worker_status_.set_text(type=="cancelled"?
+                        "Cancelled · accepted partial screened routes shown":"Completed · final ranked screened routes shown");
+                }
             }else if(type=="error"||type=="client_error"){
-                terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
+                terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
+                evaluate_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
                 terminal_event_.reset();export_.set_sensitive(false);
                 worker_status_.set_text("Worker error "+event.value("code",std::string("unknown"))+": "+
                     event.value("detail",std::string("no detail")));
