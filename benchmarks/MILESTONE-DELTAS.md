@@ -226,3 +226,14 @@ The `milestones/m5-shooting-client-report.json` checkpoint was captured at 07:45
 | gpt-6-sol | high | 5,677,889 | 5,615,616 | 62,273 | 7,631 | 3,147 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Bounded-shooting GTK workflow checkpoint
+
+The `milestones/m5-gtk-shooting-workflow.json` checkpoint was captured at 08:40:14 UTC on 23 September 2026, against `milestones/m5-gtk-shooting-workflow-start.json` from 08:20:13. This interval includes the prewritten GTK shooting contract, implementation, headless request and presentation tests, local MSYS2 and MSVC checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 7,665,556 | 7,580,160 | 85,396 | 15,124 | 7,415 |
+| gpt-6-sol | medium | 6,628,748 | 6,554,368 | 74,380 | 18,178 | 3,668 |
+
+Sol high, Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
