@@ -107,3 +107,15 @@ The `milestones/m4-fixed-impulse.json` checkpoint was captured at 23:59:15 UTC o
 | gpt-6-sol | high | 1,834,061 | 1,598,720 | 235,341 | 8,799 | 4,687 |
 
 Astra and Luna recorded no new tokens in this interval. Input includes cached input; reasoning is a subset of output. These are task-session runtime counters, not billing or the account's weekly usage. The active coordinator's final response enters only after the next refresh.
+
+## Fixed-impulse checkpoint to Mars-radius diagnostic
+
+The `milestones/m4-mars-radius.json` checkpoint was captured at 00:08:21 UTC on 23 September 2026. This interval includes the Mars-stay radius diagnostic, numerical contract/review, local validation, CI follow-up and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 3,821,972 | 3,793,792 | 28,180 | 8,294 | 3,355 |
+| gpt-6-sol | medium | 3,877,587 | 3,835,136 | 42,451 | 13,263 | 4,707 |
+| gpt-6-sol | high | 2,817,136 | 2,762,496 | 54,640 | 10,122 | 4,030 |
+
+Astra and Luna recorded no new tokens. Input includes cached input; reasoning is a subset of output. These are runtime counters from registered sessions, not billing or account-limit usage. The coordinator final response will enter at the next refresh.
