@@ -11,7 +11,7 @@
 #include <vector>
 namespace ksp {
 class WorkerClientError:public std::runtime_error {public:using std::runtime_error::runtime_error;};
-enum class WorkerResultKind { screened_seed, screened_route, fixed_impulse_evaluation };
+enum class WorkerResultKind { screened_seed, screened_route, fixed_impulse_evaluation, bounded_shooting };
 class WorkerEventValidator {
 public:
     WorkerEventValidator(std::string request_id,std::string snapshot_hash,std::string source_confidence,
@@ -24,6 +24,7 @@ private:
     std::string frame_origin_,frame_axes_,frame_handedness_;
     double state_epoch_ut_s_=0;
     std::size_t last_completed_phases_=0;
+    std::size_t shooting_total_=0,last_completed_probes_=0,shooting_progress_events_=0;
     bool saw_evaluation_phase_zero_=false;
     WorkerResultKind result_kind_;
     bool started_=false,terminal_=false;

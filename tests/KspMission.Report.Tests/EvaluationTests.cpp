@@ -41,8 +41,94 @@ Fixture fixture(){
  auto done=base("complete");done.update({{"result_label","independent_nbody_fixed_impulse_checkpointed_only"},{"role_body_ids",{{"central","sun"},{"home","home"},{"mars","mars"},{"venus","venus"}}},{"route_seed_evidence_revalidated",false},{"mars_stay_continuously_verified",false},{"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},{"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"},{"force_model","newtonian_point_mass"},{"coarse",pass},{"strict",pass},{"total_charged_delta_v_mps",4.0},{"disagreement",{{"maximum_checkpoint_position_m",0.0},{"maximum_checkpoint_velocity_mps",0.0},{"venus_event_time_s",0.0},{"venus_radius_m",0.0},{"mars_minimum_radius_m",0.0},{"mars_maximum_radius_m",0.0},{"mars_minimum_time_s",0.0},{"mars_maximum_time_s",0.0}}}});
  return {bytes,hash,request,{started,p0,p1,done}};
 }
+Fixture shooting_fixture(){
+ auto f=fixture();f.request["command"]="shoot_route";
+ f.request["shooting"]={{"finite_difference_impulse_mps",0.01},{"max_impulse_mps",1000.0},
+  {"max_iterations",6},{"max_probe_evaluations",80}};
+ auto& started=f.events[0];started["result_label"]="independent_nbody_coarse_trial_diagnostic_only";
+ auto progress=f.events[1];progress.erase("completed_phases");progress.erase("total_phases");
+ progress.update({{"phase","coarse_probes"},{"completed_probes",1},{"total_probes",80},
+  {"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},
+  {"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"}});
+ auto done=f.events.back(),strict=done;
+ strict["coarse"]["venus"].erase("safety_margin_m");
+ strict["strict"]["venus"].erase("safety_margin_m");
+ done.erase("coarse");done.erase("strict");done.erase("disagreement");done.erase("force_model");
+ done.erase("total_charged_delta_v_mps");
+ done.update({{"status","checkpointed_accepted"},{"completed_probes",1},{"total_probes",80},
+  {"iterations",0},{"final_trial",{{"launch_parking_state",f.request["trial"]["launch_parking_state"]},
+   {"impulses_mps",f.request["trial"]["impulses_mps"]},
+   {"checkpoint_targets_relative",f.request["trial"]["checkpoint_targets_relative"]}}},
+  {"coarse_diagnostics",{{"burns",strict["coarse"]["burns"]},
+   {"checkpoints",json::array()},{"selected_venus",strict["coarse"]["venus"]},
+   {"venus_event_count",1},{"minimum_observed_venus_boundary_margin_m",399000.0},
+   {"mars_radius",strict["coarse"]["mars_radius"]},{"total_charged_delta_v_mps",4.0}}},
+  {"strict",{{"coarse",strict["coarse"]},{"fine",strict["strict"]},
+   {"total_charged_delta_v_mps",4.0},{"disagreement",strict["disagreement"]}}}});
+ for(const auto& point:strict["coarse"]["checkpoints"])
+  done["coarse_diagnostics"]["checkpoints"].push_back({{"name",point["name"]},{"ut_s",point["ut_s"]},
+   {"signed_position_residual_m",{0,0,0}},{"signed_velocity_residual_mps",{0,0,0}},
+   {"signed_parking_radius_residual_m",0.0},{"signed_radial_velocity_mps",0.0},
+   {"signed_tangential_speed_residual_mps",0.0}});
+ done["coarse_diagnostics"]["mars_radius"].erase("endpoint_count");
+ done["coarse_diagnostics"]["mars_radius"].erase("root_count");
+ done["coarse_diagnostics"]["selected_venus"].erase("safety_margin_m");
+ f.events={started,progress,done};return f;
+}
 }
 int main(){try{
+ auto shooting=shooting_fixture();
+ auto shot_document=ksp::compose_shooting_report(shooting.bytes,shooting.hash,shooting.request,shooting.events);
+ check(shot_document["report_kind"]=="bounded_shooting"&&
+  shot_document["events"].back()["status"]=="checkpointed_accepted","shooting report composed");
+ auto shot_bad=shot_document;shot_bad["events"].back()["final_trial"]["checkpoint_targets_relative"][0]["position_m"][0]=1;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"moved fixed target");
+ shot_bad=shot_document;shot_bad["runtime_snapshot_json_bytes"]=shot_bad["runtime_snapshot_json_bytes"].get<std::string>()+" ";
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"changed exact bytes");
+ shot_bad=shot_document;shot_bad["events"].back()["final_trial"]["impulses_mps"][0][0]=2;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"altered final impulse");
+ shot_bad=shot_document;shot_bad["request"]["shooting"]["max_probe_evaluations"]=0;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"invalid shooting cap");
+ shot_bad=shot_document;shot_bad["request"]["trial"]["impulses_mps"][0][0]=1001;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"over-cap seed impulse");
+ shot_bad=shot_document;shot_bad["request"]["trial"]["coarse_ephemeris"]["start_ut_s"]=-1;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"ephemeris source epoch mismatch");
+ shot_bad=shot_document;shot_bad["events"].back().erase("strict");
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"accepted missing strict result");
+ shot_bad=shot_document;shot_bad["events"].back()["principia_matched"]=true;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"fabricated verification claim");
+ shot_bad=shot_document;shot_bad["events"].back()["verification_status"]="verified";
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"alternate verification claim");
+ shot_bad=shot_document;shot_bad["events"].back()["coarse_diagnostics"]["selected_venus"]["clearance_m"]=500000;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"source Venus clearance mismatch");
+ shot_bad=shot_document;shot_bad["events"].push_back(shot_bad["events"].back());
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"duplicate terminal");
+ shot_bad=shot_document;shot_bad["events"][1]["completed_probes"]=0;
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"progress regression");
+ auto diagnostic=shooting_fixture();diagnostic.events.back()["status"]="strict_rejected";
+ diagnostic.events.back()["result_label"]="independent_nbody_coarse_trial_diagnostic_only";
+ diagnostic.events.back().erase("strict");
+ auto diagnostic_doc=ksp::compose_shooting_report(diagnostic.bytes,diagnostic.hash,
+  diagnostic.request,diagnostic.events);
+ check(diagnostic_doc["events"].back()["status"]=="strict_rejected","shooting diagnostic report saved as non-success");
+ shot_bad=diagnostic_doc;shot_bad["events"].back()["strict"]=shot_document["events"].back()["strict"];
+ rejects([&]{ksp::validate_shooting_report(shot_bad);},"diagnostic strict result forbidden");
+ auto cancelled=shooting_fixture();cancelled.events.back()["type"]="cancelled";
+ rejects([&]{ksp::compose_shooting_report(cancelled.bytes,cancelled.hash,cancelled.request,cancelled.events);},
+  "cancelled stream cannot become report");
+ const auto shot_path=std::filesystem::temp_directory_path()/("ksp-shooting-report-"+
+  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".json");
+ ksp::save_shooting_report(diagnostic_doc,shot_path);
+ check(ksp::load_shooting_report(shot_path)==diagnostic_doc,
+  "shooting diagnostic report saves and reloads without acceptance");
+ ksp::save_shooting_report(shot_document,shot_path);
+ check(ksp::load_shooting_report(shot_path)==shot_document,"shooting report atomic round-trip");
+ shot_bad=shot_document;shot_bad["result_label"]="optimized";
+ rejects([&]{ksp::save_shooting_report(shot_bad,shot_path);},"bad shooting replacement rejected");
+ check(ksp::load_shooting_report(shot_path)==shot_document,"shooting last good report intact");
+ {std::ofstream out(shot_path,std::ios::trunc);out<<"{";}
+ rejects([&]{ksp::load_shooting_report(shot_path);},"truncated shooting report rejected");
+ std::filesystem::remove(shot_path);
  auto f=fixture();auto document=ksp::compose_fixed_evaluation_report(f.bytes,f.hash,f.request,f.events);
  const auto path=std::filesystem::temp_directory_path()/"ksp-fixed-evaluation-report-test.json";
  ksp::save_fixed_evaluation_report(document,path);check(ksp::load_fixed_evaluation_report(path)==document,"round trip");

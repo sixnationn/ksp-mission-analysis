@@ -24,6 +24,48 @@ json evaluation_pass(){
 int main(int argc,char** argv){const std::string mode=argc>1?argv[1]:"valid";
  if(mode=="never_read"){std::this_thread::sleep_for(std::chrono::seconds(30));return 0;}
  std::string request;std::getline(std::cin,request);
+ if(mode.rfind("shooting_",0)==0){
+  json base={{"protocol_version",1},{"request_id","shooting-client-test"},
+   {"snapshot_hash",std::string(64,'a')},{"source_confidence","runtime_observed_uncompared"}};
+  auto started=base;started.update({{"type","started"},{"source_mode","runtime_snapshot"},
+   {"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},
+   {"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"},
+   {"result_label","independent_nbody_coarse_trial_diagnostic_only"}});
+  auto progress=base;progress.update({{"type","progress"},{"phase","coarse_probes"},
+   {"completed_probes",1},{"total_probes",80},{"frame_origin","system_barycenter"},
+   {"frame_axes","principia_alicesun_frozen_at_capture"},{"frame_handedness","right"},
+   {"state_epoch_ut_s",0.0},{"units","SI"}});
+  auto done=base;done.update({{"type","complete"},{"status","checkpointed_accepted"},
+   {"result_label","independent_nbody_fixed_impulse_checkpointed_only"},
+   {"completed_probes",1},{"total_probes",80},{"iterations",0},
+   {"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},
+   {"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"},
+   {"role_body_ids",{{"central","sun"},{"home","home"},{"mars","mars"},{"venus","venus"}}},
+   {"route_seed_evidence_revalidated",false},{"mars_stay_continuously_verified",false}});
+  json state={{"position_m",{0,0,0}},{"velocity_mps",{0,0,0}}};
+  done["final_trial"]={{"launch_parking_state",state},
+   {"impulses_mps",json::array({json::array({1,0,0}),json::array({1,0,0}),json::array({1,0,0}),json::array({1,0,0})})},
+   {"checkpoint_targets_relative",json::array({state,state,state,state})}};
+  auto pass=evaluation_pass();pass["venus"].erase("safety_margin_m");
+  json signed_checks=json::array();
+  for(const auto& point:pass["checkpoints"])
+   signed_checks.push_back({{"name",point["name"]},{"ut_s",point["ut_s"]},
+    {"signed_position_residual_m",{0,0,0}},{"signed_velocity_residual_mps",{0,0,0}},
+    {"signed_parking_radius_residual_m",0.0},{"signed_radial_velocity_mps",0.0},
+    {"signed_tangential_speed_residual_mps",0.0}});
+  done["coarse_diagnostics"]={{"burns",pass["burns"]},{"checkpoints",signed_checks},
+   {"selected_venus",pass["venus"]},{"venus_event_count",1},
+   {"minimum_observed_venus_boundary_margin_m",1000.0},
+   {"mars_radius",pass["mars_radius"]},{"total_charged_delta_v_mps",4.0}};
+  done["coarse_diagnostics"]["mars_radius"].erase("endpoint_count");
+  done["coarse_diagnostics"]["mars_radius"].erase("root_count");
+  done["strict"]={{"coarse",pass},{"fine",pass},{"total_charged_delta_v_mps",4.0},
+   {"disagreement",{{"maximum_checkpoint_position_m",0.0},{"maximum_checkpoint_velocity_mps",0.0},
+    {"venus_event_time_s",0.0},{"venus_radius_m",0.0},{"mars_minimum_radius_m",0.0},
+    {"mars_maximum_radius_m",0.0},{"mars_minimum_time_s",0.0},{"mars_maximum_time_s",0.0}}}};
+  if(mode=="shooting_wrong_impulse")done["strict"]["fine"]["burns"][0]["delta_v_mps"]={2,0,0};
+  std::cout<<started.dump()<<std::endl<<progress.dump()<<std::endl<<done.dump()<<std::endl;return 0;
+ }
  if(mode.rfind("evaluation_",0)==0){
   json base={{"protocol_version",1},{"request_id","evaluation-client-test"},
    {"snapshot_hash",std::string(64,'a')},{"source_confidence","runtime_observed_uncompared"}};

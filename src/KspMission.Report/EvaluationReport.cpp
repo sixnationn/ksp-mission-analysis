@@ -35,7 +35,9 @@ void equal_number(double a,double b,const char* message){require(close_numbers(a
 void allowed(const json& value,std::initializer_list<const char*> keys,const char* message){require(value.is_object(),message);std::unordered_set<std::string> names(keys.begin(),keys.end());for(auto it=value.begin();it!=value.end();++it)require(names.contains(it.key()),message);}
 void reject_claims(const json& value){
  if(value.is_object())for(auto it=value.begin();it!=value.end();++it){
-  require(it.key()!="feasible"&&it.key()!="principia_equivalent"&&it.key()!="installed_game_verified"&&it.key()!="optimized","unsupported verification claim");reject_claims(it.value());}
+  require(it.key()!="feasible"&&it.key()!="principia_equivalent"&&it.key()!="installed_game_verified"&&
+   it.key()!="optimized"&&it.key()!="global_optimum"&&it.key()!="principia_matched"&&
+   it.key()!="runtime_verified","unsupported verification claim");reject_claims(it.value());}
  else if(value.is_array())for(const auto& item:value)reject_claims(item);
 }
 void vector3(const json& value){require(value.is_array()&&value.size()==3,"SI vector must have three elements");for(const auto& item:value)require(item.is_number()&&std::isfinite(item.get<double>()),"SI vector nonfinite");}
@@ -161,6 +163,207 @@ void check_document(const json& document){
  }
  require(complete==1&&validator.terminal(),"completed worker stream missing");
 }
+void check_shooting_document(const json& document){
+ require(document.is_object(),"shooting report object required");reject_claims(document);
+ allowed(document,{"schema_version","report_kind","result_label","route_seed_evidence_revalidated",
+  "mars_stay_continuously_verified","runtime_snapshot_json_bytes","snapshot_sha256","request","events"},
+  "unsupported shooting report field");
+ require(document.contains("schema_version")&&document.at("schema_version")==1&&
+  string(document,"report_kind")=="bounded_shooting","shooting report version or kind invalid");
+ require(document.value("route_seed_evidence_revalidated",true)==false&&
+  document.value("mars_stay_continuously_verified",true)==false,"shooting report evidence flags invalid");
+ const auto bytes=string(document,"runtime_snapshot_json_bytes");
+ require(bytes.size()<=source_limit&&document.dump().size()<=report_limit,"shooting report/source exceeds cap");
+ const auto hash=string(document,"snapshot_sha256");
+ require(hash.size()==64&&sha256_hex(bytes)==hash,"shooting exact-byte hash mismatch");
+ const auto loaded=read_runtime_snapshot(bytes,hash);
+ require(loaded.snapshot.confidence=="runtime_observed_uncompared"&&loaded.snapshot.frame.inertial&&
+  loaded.snapshot.frame.handedness=="right","shooting source provenance invalid");
+ const auto& request=object(document,"request");
+ allowed(request,{"protocol_version","command","request_id","source","trial","shooting"},
+  "unsupported shooting request field");
+ require(request.contains("protocol_version")&&request.at("protocol_version")==1&&
+  string(request,"command")=="shoot_route"&&request.dump().size()<=1024*1024,
+  "shooting request invalid");
+ const auto id=string(request,"request_id");require(id.size()<=128,"shooting request ID exceeds cap");
+ const auto& source=object(request,"source");
+ allowed(source,{"mode","path","expected_snapshot_hash","expected_frame_origin",
+  "expected_frame_axes","expected_state_epoch_ut_s"},"shooting source field invalid");
+ require(string(source,"mode")=="runtime_snapshot"&&string(source,"path").size()>0&&
+  string(source,"expected_snapshot_hash")==hash&&
+  string(source,"expected_frame_origin")==loaded.snapshot.frame.origin&&
+  string(source,"expected_frame_axes")==loaded.snapshot.frame.axes&&
+  number(source,"expected_state_epoch_ut_s")==*loaded.snapshot.state_epoch_ut_s,
+  "shooting request source identity mismatch");
+ const auto& limits=object(request,"shooting");
+ allowed(limits,{"finite_difference_impulse_mps","max_impulse_mps","max_iterations",
+  "max_probe_evaluations"},"shooting limit field invalid");
+ require(number(limits,"finite_difference_impulse_mps")>0&&number(limits,"max_impulse_mps")>0,
+  "shooting impulse limits invalid");
+ (void)cap(limits,"max_iterations",1000);const auto probe_cap=cap(limits,"max_probe_evaluations",10000);
+ const auto& trial=object(request,"trial"),&seed=object(trial,"route_seed");
+ allowed(trial,{"route_seed","launch_parking_state","impulses_mps","checkpoint_targets_relative",
+  "home_parking_altitude_m","mars_parking_altitude_m","home_capture_altitude_m",
+  "fixed_position_tolerance_m","fixed_velocity_tolerance_mps","parking_radius_tolerance_m",
+  "parking_radial_velocity_tolerance_mps","parking_tangential_speed_tolerance_mps",
+  "venus_window_halfwidth_s","venus_max_encounter_radius_m","venus_safety_margin_m",
+  "disagreement_position_m","disagreement_velocity_mps","disagreement_event_time_s",
+  "disagreement_mars_extremum_radius_m","disagreement_mars_extremum_time_s",
+  "coarse_ephemeris","strict_ephemeris","coarse_spacecraft","strict_spacecraft"},
+  "shooting trial field invalid");
+ allowed(seed,{"central_body_id","home_body_id","mars_body_id","venus_body_id","launch_ut_s",
+  "mars_arrival_ut_s","mars_departure_ut_s","venus_encounter_ut_s","home_return_ut_s",
+  "fixed_stay_s","snapshot_hash","source_confidence"},"shooting seed field invalid");
+ require(string(seed,"snapshot_hash")==hash&&string(seed,"source_confidence")==loaded.snapshot.confidence,
+  "shooting seed source mismatch");
+ std::set<std::string> roles;
+ for(const char* key:{"central_body_id","home_body_id","mars_body_id","venus_body_id"}){
+  const auto role=string(seed,key);roles.insert(role);
+  require(std::any_of(loaded.snapshot.bodies.begin(),loaded.snapshot.bodies.end(),
+   [&](const Body& body){return body.id==role;}),"shooting role absent from source");
+ }require(roles.size()==4,"shooting role IDs not distinct");
+ const double t0=number(seed,"launch_ut_s"),t1=number(seed,"mars_arrival_ut_s"),
+  t2=number(seed,"mars_departure_ut_s"),t3=number(seed,"venus_encounter_ut_s"),
+  t4=number(seed,"home_return_ut_s");
+ require(t0<t1&&t1<t2&&t2<t3&&t3<t4&&t2-t1==5184000.0&&
+  number(seed,"fixed_stay_s")==5184000.0,"shooting fixed dates/stay invalid");
+ check_settings(trial,t0,t1,t2,t3,t4);
+ require(number(object(trial,"coarse_ephemeris"),"start_ut_s")==*loaded.snapshot.state_epoch_ut_s&&
+  number(object(trial,"strict_ephemeris"),"start_ut_s")==*loaded.snapshot.state_epoch_ut_s,
+  "shooting ephemeris start differs from source epoch");
+ for(const char* key:{"fixed_position_tolerance_m","fixed_velocity_tolerance_mps",
+  "parking_radius_tolerance_m","parking_radial_velocity_tolerance_mps",
+  "parking_tangential_speed_tolerance_mps","venus_window_halfwidth_s",
+  "venus_max_encounter_radius_m","disagreement_position_m","disagreement_velocity_mps",
+  "disagreement_event_time_s","disagreement_mars_extremum_radius_m",
+  "disagreement_mars_extremum_time_s"})
+  require(number(trial,key)>0,"shooting request tolerance invalid");
+ for(const char* key:{"home_parking_altitude_m","mars_parking_altitude_m",
+  "home_capture_altitude_m","venus_safety_margin_m"})
+  require(number(trial,key)>=0,"shooting altitude or margin invalid");
+ state(object(trial,"launch_parking_state"));
+ const auto& request_impulses=array(trial,"impulses_mps"),&request_targets=array(trial,"checkpoint_targets_relative");
+ require(request_impulses.size()==4&&request_targets.size()==4,"shooting four request impulses/targets required");
+ for(std::size_t i=0;i<4;++i){vector3(request_impulses.at(i));state(request_targets.at(i));
+  double squared=0;for(const auto& component:request_impulses.at(i))
+   squared+=component.get<double>()*component.get<double>();
+  require(std::sqrt(squared)<=number(limits,"max_impulse_mps"),"shooting seed impulse exceeds cap");}
+ const auto& events=array(document,"events");
+ require(events.size()>=3&&events.size()<=130,"shooting completed event count invalid");
+ WorkerEventValidator validator(id,hash,loaded.snapshot.confidence,0,WorkerResultKind::bounded_shooting);
+ for(const auto& event:events){require(event.is_object()&&event.dump().size()<=1024*1024,
+   "shooting event line exceeds cap");
+  const auto type=string(event,"type");require(type=="started"||type=="progress"||type=="complete",
+   "shooting report requires completed worker stream");
+  validator.accept_line(event.dump());
+ }
+ require(validator.terminal()&&string(events.back(),"type")=="complete","shooting terminal missing");
+ const auto& terminal=events.back(),&final_trial=object(terminal,"final_trial");
+ require(string(document,"result_label")==string(terminal,"result_label"),"shooting report label differs from terminal");
+ require(number(terminal,"total_probes")==static_cast<double>(probe_cap),"shooting cap differs from request");
+ const auto& mapped=object(terminal,"role_body_ids");
+ for(const auto& [actual,seed_key]:std::array<std::pair<const char*,const char*>,4>{{
+  {"central","central_body_id"},{"home","home_body_id"},{"mars","mars_body_id"},{"venus","venus_body_id"}}})
+  require(string(mapped,actual)==string(seed,seed_key),"shooting mapped role differs from request");
+ require(final_trial.at("launch_parking_state")==trial.at("launch_parking_state")&&
+  final_trial.at("checkpoint_targets_relative")==request_targets,
+  "shooting launch or fixed targets moved");
+ const auto& final_impulses=array(final_trial,"impulses_mps");
+ for(const auto& impulse:final_impulses){vector3(impulse);double squared=0;
+  for(const auto& component:impulse)squared+=component.get<double>()*component.get<double>();
+  require(std::sqrt(squared)<=number(limits,"max_impulse_mps"),"shooting final impulse exceeds cap");}
+ const auto& probe=object(terminal,"coarse_diagnostics"),&burns=array(probe,"burns");
+ const char* epochs[]={"launch_ut_s","mars_arrival_ut_s","mars_departure_ut_s","home_return_ut_s"};
+ for(std::size_t i=0;i<4;++i){
+  require(number(burns.at(i),"ut_s")==number(seed,epochs[i]),"shooting burn epoch differs from fixed date");
+  const auto& vector=array(burns.at(i),"delta_v_mps");
+  for(std::size_t j=0;j<3;++j)equal_number(vector.at(j).get<double>(),final_impulses.at(i).at(j).get<double>(),
+   "shooting burn vector differs from final impulse");
+ }
+ const auto status=string(terminal,"status");
+ const auto venus_id=string(seed,"venus_body_id");
+ auto venus_body=std::find_if(loaded.snapshot.bodies.begin(),loaded.snapshot.bodies.end(),
+  [&](const Body& item){return item.id==venus_id;});
+ auto venus_atmosphere=std::find_if(loaded.atmosphere_boundaries.begin(),loaded.atmosphere_boundaries.end(),
+  [&](const AtmosphereBoundary& item){return item.body_id==venus_id;});
+ require(venus_body!=loaded.snapshot.bodies.end()&&venus_atmosphere!=loaded.atmosphere_boundaries.end(),
+  "shooting Venus source boundary missing");
+ auto boundary_for=[&](const std::string& id){auto found=std::find_if(loaded.atmosphere_boundaries.begin(),
+  loaded.atmosphere_boundaries.end(),[&](const AtmosphereBoundary& item){return item.body_id==id;});
+  require(found!=loaded.atmosphere_boundaries.end(),"shooting source atmosphere missing");return found->altitude_m;};
+ require(number(trial,"home_parking_altitude_m")>=boundary_for(string(seed,"home_body_id"))&&
+  number(trial,"home_capture_altitude_m")>=boundary_for(string(seed,"home_body_id"))&&
+  number(trial,"mars_parking_altitude_m")>=boundary_for(string(seed,"mars_body_id")),
+  "shooting parking altitude below source atmosphere");
+ require(number(trial,"venus_max_encounter_radius_m")>venus_body->radius_m+
+  venus_atmosphere->altitude_m+number(trial,"venus_safety_margin_m"),
+  "shooting Venus encounter cap below source safety boundary");
+ require(probe.contains("selected_venus")&&probe.contains("minimum_observed_venus_boundary_margin_m"),
+  "shooting Venus diagnostic missing");
+ if(!probe.at("selected_venus").is_null()){
+  const auto& selected=object(probe,"selected_venus");
+  require(string(selected,"body_id")==venus_id&&
+   std::abs(number(selected,"ut_s")-t3)<=number(trial,"venus_window_halfwidth_s"),
+   "shooting selected Venus event differs from request");
+  equal_number(number(selected,"clearance_m"),number(selected,"distance_m")-
+   venus_body->radius_m-venus_atmosphere->altitude_m,
+   "shooting selected Venus clearance differs from source");
+  if(status=="checkpointed_accepted"){
+   require(number(selected,"distance_m")<=number(trial,"venus_max_encounter_radius_m")&&
+    number(selected,"clearance_m")>number(trial,"venus_safety_margin_m"),
+    "shooting accepted Venus event unsafe or outside radius");
+  }
+ }
+ if(status=="checkpointed_accepted"){
+  require(!probe.at("selected_venus").is_null()&&
+   number(probe,"minimum_observed_venus_boundary_margin_m")>0,
+   "shooting accepted Venus diagnostic missing safety margin");
+ }
+ if(status=="checkpointed_accepted"){
+  auto final_request=trial;final_request["impulses_mps"]=final_impulses;
+  const auto& strict=object(terminal,"strict");
+  for(const char* key:{"coarse","fine"}){
+   json pass=object(strict,key);auto& venus=pass["venus"];
+   const auto body_id=string(seed,"venus_body_id");
+   auto body=std::find_if(loaded.snapshot.bodies.begin(),loaded.snapshot.bodies.end(),
+    [&](const Body& item){return item.id==body_id;});require(body!=loaded.snapshot.bodies.end(),"Venus source body absent");
+   auto atmosphere=std::find_if(loaded.atmosphere_boundaries.begin(),loaded.atmosphere_boundaries.end(),
+    [&](const AtmosphereBoundary& item){return item.body_id==body_id;});
+   require(atmosphere!=loaded.atmosphere_boundaries.end(),"Venus source atmosphere absent");
+   const double distance=number(venus,"distance_m");
+   equal_number(number(venus,"clearance_m"),distance-body->radius_m-atmosphere->altitude_m,
+    "shooting strict Venus clearance differs from source");
+   venus["safety_margin_m"]=distance-body->radius_m-atmosphere->altitude_m-
+    number(trial,"venus_safety_margin_m");
+   check_pass(pass,final_request,seed,loaded);
+  }
+  const auto& coarse=object(strict,"coarse"),&fine=object(strict,"fine");
+  const auto& disagreement=object(strict,"disagreement");
+  for(const auto& [metric,budget]:std::array<std::pair<const char*,const char*>,7>{{
+   {"maximum_checkpoint_position_m","disagreement_position_m"},
+   {"maximum_checkpoint_velocity_mps","disagreement_velocity_mps"},
+   {"venus_event_time_s","disagreement_event_time_s"},
+   {"mars_minimum_radius_m","disagreement_mars_extremum_radius_m"},
+   {"mars_maximum_radius_m","disagreement_mars_extremum_radius_m"},
+   {"mars_minimum_time_s","disagreement_mars_extremum_time_s"},
+   {"mars_maximum_time_s","disagreement_mars_extremum_time_s"}}})
+   require(number(disagreement,metric)<=number(trial,budget),"shooting strict disagreement exceeds budget");
+  auto derived=[&](const char* metric,const json& left,const json& right,const char* field){
+   equal_number(number(disagreement,metric),std::abs(number(left,field)-number(right,field)),
+    "shooting strict disagreement differs from passes");};
+  const auto& cv=object(coarse,"venus"),&fv=object(fine,"venus");
+  derived("venus_event_time_s",cv,fv,"ut_s");derived("venus_radius_m",cv,fv,"distance_m");
+  const auto& cm=object(coarse,"mars_radius"),&fm=object(fine,"mars_radius");
+  derived("mars_minimum_radius_m",cm,fm,"observed_minimum_m");
+  derived("mars_maximum_radius_m",cm,fm,"observed_maximum_m");
+  derived("mars_minimum_time_s",cm,fm,"observed_minimum_ut_s");
+  derived("mars_maximum_time_s",cm,fm,"observed_maximum_ut_s");
+  require(number(disagreement,"venus_radius_m")<=0.1*std::min(
+   number(cv,"clearance_m")-number(trial,"venus_safety_margin_m"),
+   number(fv,"clearance_m")-number(trial,"venus_safety_margin_m")),
+   "shooting Venus radius disagreement exceeds safety margin");
+ }
+}
 void write_synced(const std::filesystem::path& path,const std::string& bytes){
 #ifdef _WIN32
  FILE* file=_wfopen(path.c_str(),L"wb");
@@ -195,4 +398,37 @@ void save_fixed_evaluation_report(const json& document,const std::filesystem::pa
  try{write_synced(temporary,bytes);replace_file(temporary,path);}catch(...){std::error_code ignored;std::filesystem::remove(temporary,ignored);throw;}
 }
 json load_fixed_evaluation_report(const std::filesystem::path& path){std::ifstream file(path,std::ios::binary|std::ios::ate);require(static_cast<bool>(file),"report open failed");const auto length=file.tellg();require(length>=0&&length<=static_cast<std::streamoff>(report_limit),"report exceeds 32 MiB");std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);require(static_cast<bool>(file.read(bytes.data(),length)),"report read failed");auto document=json::parse(bytes,nullptr,false);require(!document.is_discarded(),"report JSON invalid");validate_fixed_evaluation_report(document);return document;}
+json compose_shooting_report(const std::string& runtime_bytes,const std::string& expected_sha256,
+ const json& request,const std::vector<json>& events){
+ try{require(runtime_bytes.size()<=source_limit,"runtime source exceeds 16 MiB");
+  require(!events.empty()&&events.back().is_object(),"shooting completion missing");
+  json document={{"schema_version",1},{"report_kind","bounded_shooting"},
+   {"result_label",string(events.back(),"result_label")},
+   {"route_seed_evidence_revalidated",false},{"mars_stay_continuously_verified",false},
+   {"runtime_snapshot_json_bytes",runtime_bytes},{"snapshot_sha256",expected_sha256},
+   {"request",request},{"events",events}};
+  validate_shooting_report(document);return document;
+ }catch(const EvaluationReportError&){throw;}catch(const std::exception& e){throw EvaluationReportError(e.what());}
+}
+void validate_shooting_report(const json& document){
+ try{check_shooting_document(document);}catch(const EvaluationReportError&){throw;}
+ catch(const std::exception& e){throw EvaluationReportError(e.what());}
+}
+void save_shooting_report(const json& document,const std::filesystem::path& path){
+ validate_shooting_report(document);require(!path.empty(),"report path missing");
+ const auto bytes=document.dump(2)+"\n";require(bytes.size()<=report_limit,"report exceeds 32 MiB");
+ auto temporary=path;temporary+=std::filesystem::path(".tmp."+
+  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+ try{write_synced(temporary,bytes);replace_file(temporary,path);}
+ catch(...){std::error_code ignored;std::filesystem::remove(temporary,ignored);throw;}
+}
+json load_shooting_report(const std::filesystem::path& path){
+ std::ifstream file(path,std::ios::binary|std::ios::ate);require(static_cast<bool>(file),"report open failed");
+ const auto length=file.tellg();require(length>=0&&length<=static_cast<std::streamoff>(report_limit),
+  "report exceeds 32 MiB");
+ std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+ require(static_cast<bool>(file.read(bytes.data(),length)),"report read failed");
+ auto document=json::parse(bytes,nullptr,false);require(!document.is_discarded(),"report JSON invalid");
+ validate_shooting_report(document);return document;
+}
 }

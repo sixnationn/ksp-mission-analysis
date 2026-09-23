@@ -206,6 +206,102 @@ void evaluation_validator_cases(){
    {"type","error"},{"code","source_read_failed"},{"detail","missing"}};
  source_error.accept_line(early.dump());check(source_error.terminal(),"pre-source error accepted");
 }
+json shooting_event(const std::string& type){
+ auto e=evaluation_event(type);e["request_id"]="shooting-client-test";
+ if(type=="started"){
+  e["result_label"]="independent_nbody_coarse_trial_diagnostic_only";
+  e["non_interruptible_stages"]={"planetary_ephemeris_integration","single_spacecraft_probe","strict_coarse_and_fine_repropagation"};
+ }
+ if(type=="progress"){
+  e.erase("completed_phases");e.erase("total_phases");
+  e.update(json{{"phase","coarse_probes"},{"completed_probes",1},{"total_probes",80},
+   {"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},
+   {"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"}});
+ }
+ if(type=="complete"){
+  auto fixed=e;fixed["coarse"]["venus"].erase("safety_margin_m");
+  fixed["strict"]["venus"].erase("safety_margin_m");
+  const auto burns=fixed["coarse"]["burns"];
+  e.erase("coarse");e.erase("strict");e.erase("disagreement");e.erase("force_model");
+  e.erase("total_charged_delta_v_mps");
+  json state={{"position_m",{0,0,0}},{"velocity_mps",{0,0,0}}};
+  e.update(json{{"status","checkpointed_accepted"},{"completed_probes",1},{"total_probes",80},
+   {"iterations",0},{"final_trial",{{"launch_parking_state",state},
+    {"impulses_mps",json::array({json::array({1,0,0}),json::array({1,0,0}),json::array({1,0,0}),json::array({1,0,0})})},
+    {"checkpoint_targets_relative",json::array({state,state,state,state})}}},
+   {"coarse_diagnostics",{{"burns",burns},{"checkpoints",json::array()},
+    {"selected_venus",{{"body_id","venus"},{"ut_s",5186000.0},{"distance_m",1500000.0},{"clearance_m",400000.0}}},
+    {"venus_event_count",1},{"minimum_observed_venus_boundary_margin_m",399000.0},
+    {"mars_radius",{{"observed_minimum_m",1200000.0},{"observed_minimum_ut_s",1000.0},
+      {"observed_maximum_m",1210000.0},{"observed_maximum_ut_s",5185000.0},
+      {"model_interval_lower_m",1195000.0},{"model_interval_upper_m",1215000.0}}},
+    {"total_charged_delta_v_mps",4.0}}},
+   {"strict",{{"coarse",fixed["coarse"]},{"fine",fixed["strict"]},
+    {"total_charged_delta_v_mps",4.0},{"disagreement",fixed["disagreement"]}}}});
+  const double epochs[4]={0,1000,5185000,5187000};
+  const char* names[4]={"launch","Mars capture","Mars pre-departure","home return capture"};
+  for(int i=0;i<4;++i)e["coarse_diagnostics"]["checkpoints"].push_back({{"name",names[i]},
+   {"ut_s",epochs[i]},{"signed_position_residual_m",{0,0,0}},
+   {"signed_velocity_residual_mps",{0,0,0}},{"signed_parking_radius_residual_m",0.0},
+   {"signed_radial_velocity_mps",0.0},{"signed_tangential_speed_residual_mps",0.0}});
+ }
+ return e;
+}
+void shooting_validator_cases(){
+ auto create=[](){return WorkerEventValidator("shooting-client-test",std::string(64,'a'),
+  "runtime_observed_uncompared",0,WorkerResultKind::bounded_shooting);};
+ auto started=shooting_event("started"),progress=shooting_event("progress"),done=shooting_event("complete");
+ auto v=create();v.accept_line(started.dump());v.accept_line(progress.dump());v.accept_line(done.dump());
+ check(v.terminal(),"shooting accepted stream terminal");
+ rejects([&]{v.accept_line(done.dump());},"after terminal");
+ auto bad_started=started;bad_started["snapshot_hash"]="wrong";
+ rejects([&]{auto x=create();x.accept_line(bad_started.dump());},"snapshot_hash");
+ bad_started=started;bad_started["source_confidence"]="synthetic_fixture";
+ rejects([&]{auto x=create();x.accept_line(bad_started.dump());},"confidence");
+ bad_started=started;bad_started["frame_axes"]="rotating";
+ rejects([&]{auto x=create();x.accept_line(bad_started.dump());},"frame");
+ auto bad=progress;bad["completed_probes"]=81;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(bad.dump());},"cap");
+ bad=progress;bad["total_probes"]=10001;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(bad.dump());},"cap");
+ bad=done;bad["state_epoch_ut_s"]=1;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"epoch");
+ bad=done;bad["route_seed_evidence_revalidated"]=true;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"evidence");
+ bad=done;bad["coarse_diagnostics"]["checkpoints"][0]["signed_position_residual_m"]={1,2};
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"SI vector");
+ bad=done;bad["strict"]["coarse"]["burns"][0]["delta_v_mps"]={0,1,0};
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"impulse");
+ bad=done;bad["status"]="strict_rejected";bad["result_label"]="independent_nbody_coarse_trial_diagnostic_only";bad.erase("strict");
+ auto diagnostic=create();diagnostic.accept_line(started.dump());diagnostic.accept_line(progress.dump());diagnostic.accept_line(bad.dump());
+ check(diagnostic.terminal(),"shooting diagnostic terminal");
+ bad["strict"]=done["strict"];
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"strict");
+ bad=done;bad["strict"]["coarse"].erase("mars_radius");
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"mars_radius");
+ bad=done;bad["strict"]["fine"].erase("accepted_steps");
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"accepted_steps");
+ bad=done;bad["principia_comparison"]="matched";
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"unsupported");
+ bad=done;bad["final_trial"]["checkpoint_targets_relative"][0]["verification_status"]="verified";
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"unsupported");
+ bad=shooting_event("cancelled");bad["status"]="during_numerical_work";
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"count");
+ bad["completed_probes"]=0;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(progress.dump());x.accept_line(bad.dump());},"count");
+ auto pre_cancel=shooting_event("cancelled");pre_cancel["status"]="before_numerical_work";
+ auto cancelled=create();cancelled.accept_line(pre_cancel.dump());
+ check(cancelled.terminal(),"shooting pre-start cancellation terminal");
+ auto mid_cancel=shooting_event("cancelled");mid_cancel["status"]="during_numerical_work";
+ mid_cancel["completed_probes"]=1;
+ auto mid=create();mid.accept_line(started.dump());mid.accept_line(progress.dump());
+ mid.accept_line(mid_cancel.dump());check(mid.terminal(),"shooting between-probe cancellation terminal");
+ rejects([&]{mid.accept_line(done.dump());},"after terminal");
+ auto later=progress;later["completed_probes"]=2;
+ auto regressed=progress;regressed["completed_probes"]=1;
+ rejects([&]{auto x=create();x.accept_line(started.dump());x.accept_line(later.dump());
+  x.accept_line(regressed.dump());},"regression");
+}
 ClientOptions options(const std::string& path,const std::string& mode){ClientOptions x;x.executable_path=path;x.arguments={mode};
  x.request_line=request();x.request_id="client-test";x.expected_snapshot_hash="synthetic-worker-v1";
  x.expected_source_confidence="synthetic_fixture";x.timeout=std::chrono::milliseconds(5000);
@@ -253,6 +349,20 @@ void evaluation_process_cases(const std::string& fake){
  const auto cancelled=finish(client);
  check(cancelled.size()==1&&cancelled.back()["type"]=="cancelled",
   "evaluation source-bound pre-start cancellation terminal");
+}
+void shooting_process_cases(const std::string& fake){
+ WorkerClient client;auto x=options(fake,"shooting_valid");
+ x.request_id="shooting-client-test";x.expected_snapshot_hash=std::string(64,'a');
+ x.expected_source_confidence="runtime_observed_uncompared";
+ x.result_kind=WorkerResultKind::bounded_shooting;
+ x.request_line=json{{"protocol_version",1},{"command","shoot_route"},
+  {"request_id",x.request_id}}.dump();
+ check(client.start(x),"shooting fake starts without blocking caller");
+ const auto valid=finish(client);
+ check(valid.size()==3&&valid.front()["type"]=="started"&&valid.back()["type"]=="complete",
+  "shooting fake process accepted round-trip");
+ x.arguments={"shooting_wrong_impulse"};check(client.start(x),"shooting invalid fake starts");
+ check(error(finish(client),"invalid_event"),"shooting malformed child event rejected");
 }
 void blocked_write_cases(const std::string& fake){
  auto x=options(fake,"never_read");x.request_line=std::string(1024*1024-128,'x');
@@ -305,5 +415,5 @@ void real_mission_case(const std::string& worker){
  ++checks;
 }
 }
-int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();mission_validator_cases();evaluation_validator_cases();process_cases(argv[2]);evaluation_process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);real_mission_case(argv[1]);
+int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();mission_validator_cases();evaluation_validator_cases();shooting_validator_cases();process_cases(argv[2]);evaluation_process_cases(argv[2]);shooting_process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);real_mission_case(argv[1]);
  std::cout<<"PASS "<<checks<<" worker client checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

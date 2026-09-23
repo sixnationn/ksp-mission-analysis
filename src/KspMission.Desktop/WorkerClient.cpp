@@ -237,6 +237,200 @@ void check_evaluation_complete(const json& event,const std::string& origin,const
         "venus_event_time_s","venus_radius_m","mars_minimum_radius_m","mars_maximum_radius_m",
         "mars_minimum_time_s","mars_maximum_time_s"})nonnegative_field(disagreement,key);
 }
+void reject_shooting_claims(const json& value){
+    if(value.is_object())for(auto it=value.begin();it!=value.end();++it){
+        static const std::set<std::string> forbidden={"feasible","optimized","global_optimum",
+            "principia_matched","principia_equivalent","runtime_verified","installed_game_verified"};
+        if(forbidden.contains(it.key()))throw WorkerClientError("unsupported shooting verification claim");
+        reject_shooting_claims(it.value());
+    }else if(value.is_array())for(const auto& item:value)reject_shooting_claims(item);
+}
+void shooting_keys(const json& value,std::initializer_list<const char*> keys){
+    if(!value.is_object())throw WorkerClientError("shooting event object invalid");
+    std::set<std::string> names(keys.begin(),keys.end());
+    for(auto it=value.begin();it!=value.end();++it)
+        if(!names.contains(it.key()))throw WorkerClientError("unsupported shooting event field: "+it.key());
+}
+void shooting_schema(const json& event,const std::string& type){
+    if(type=="started")shooting_keys(event,{"protocol_version","request_id","type","snapshot_hash",
+        "source_confidence","source_mode","frame_origin","frame_axes","frame_handedness",
+        "state_epoch_ut_s","units","result_label","non_interruptible_stages"});
+    else if(type=="progress")shooting_keys(event,{"protocol_version","request_id","type","snapshot_hash",
+        "source_confidence","phase","completed_probes","total_probes","frame_origin","frame_axes",
+        "frame_handedness","state_epoch_ut_s","units"});
+    else if(type=="cancelled")shooting_keys(event,{"protocol_version","request_id","type","snapshot_hash",
+        "source_confidence","status","completed_probes"});
+    else if(type=="error")shooting_keys(event,{"protocol_version","request_id","type","snapshot_hash",
+        "source_confidence","code","detail"});
+    else if(type=="complete"){
+        shooting_keys(event,{"protocol_version","request_id","type","snapshot_hash","source_confidence",
+            "status","result_label","completed_probes","total_probes","iterations","frame_origin",
+            "frame_axes","frame_handedness","state_epoch_ut_s","units","role_body_ids",
+            "route_seed_evidence_revalidated","mars_stay_continuously_verified","final_trial",
+            "coarse_diagnostics","strict"});
+        shooting_keys(object_field(event,"role_body_ids"),{"central","home","mars","venus"});
+        const auto& trial=object_field(event,"final_trial");
+        shooting_keys(trial,{"launch_parking_state","impulses_mps","checkpoint_targets_relative"});
+        const auto& probe=object_field(event,"coarse_diagnostics");
+        shooting_keys(probe,{"checkpoints","burns","selected_venus","venus_event_count",
+            "minimum_observed_venus_boundary_margin_m","mars_radius","total_charged_delta_v_mps"});
+        if(!probe.contains("checkpoints")||!probe.at("checkpoints").is_array()||
+           !probe.contains("burns")||!probe.at("burns").is_array()||
+           !probe.contains("selected_venus"))throw WorkerClientError("shooting coarse arrays missing");
+        for(const auto& point:probe.at("checkpoints"))shooting_keys(point,{"name","ut_s",
+            "signed_position_residual_m","signed_velocity_residual_mps",
+            "signed_parking_radius_residual_m","signed_radial_velocity_mps",
+            "signed_tangential_speed_residual_mps"});
+        for(const auto& burn:probe.at("burns"))shooting_keys(burn,{"ut_s","delta_v_mps","magnitude_mps"});
+        shooting_keys(object_field(probe,"mars_radius"),{"observed_minimum_m","observed_minimum_ut_s",
+            "observed_maximum_m","observed_maximum_ut_s","model_interval_lower_m","model_interval_upper_m"});
+        if(!probe.at("selected_venus").is_null())
+            shooting_keys(object_field(probe,"selected_venus"),{"body_id","ut_s","distance_m","clearance_m"});
+        if(event.contains("strict")){
+            const auto& strict=object_field(event,"strict");
+            shooting_keys(strict,{"coarse","fine","total_charged_delta_v_mps","disagreement"});
+            shooting_keys(object_field(strict,"disagreement"),{"maximum_checkpoint_position_m",
+                "maximum_checkpoint_velocity_mps","venus_event_time_s","venus_radius_m",
+                "mars_minimum_radius_m","mars_maximum_radius_m","mars_minimum_time_s","mars_maximum_time_s"});
+            for(const char* key:{"coarse","fine"}){
+                const auto& pass=object_field(strict,key);
+                shooting_keys(pass,{"burns","checkpoints","accepted_steps","rejected_steps","venus","mars_radius"});
+                if(!pass.contains("burns")||!pass.at("burns").is_array()||
+                   !pass.contains("checkpoints")||!pass.at("checkpoints").is_array())
+                    throw WorkerClientError("shooting strict arrays missing");
+                for(const auto& burn:pass.at("burns"))shooting_keys(burn,{"ut_s","delta_v_mps","magnitude_mps"});
+                for(const auto& point:pass.at("checkpoints"))shooting_keys(point,{"name","ut_s",
+                    "position_error_m","velocity_error_mps","parking_radius_error_m","radial_velocity_mps",
+                    "tangential_speed_error_mps"});
+                shooting_keys(object_field(pass,"venus"),{"body_id","ut_s","distance_m","clearance_m"});
+                shooting_keys(object_field(pass,"mars_radius"),{"observed_minimum_m","observed_minimum_ut_s",
+                    "observed_maximum_m","observed_maximum_ut_s","model_interval_lower_m",
+                    "model_interval_upper_m","endpoint_count","root_count"});
+            }
+        }
+    }
+}
+bool close_scalar(double a,double b){return std::abs(a-b)<=std::max(1e-8,std::max(std::abs(a),std::abs(b))*1e-9);}
+void check_state(const json& state){
+    shooting_keys(state,{"position_m","velocity_mps"});
+    (void)vector_norm(state,"position_m");(void)vector_norm(state,"velocity_mps");
+}
+void check_shooting_complete(const json& event,const std::string& origin,const std::string& axes,
+    const std::string& handedness,double epoch,std::size_t cap,std::size_t previous){
+    reject_shooting_claims(event);
+    if(text_field(event,"frame_origin")!=origin||text_field(event,"frame_axes")!=axes||
+       text_field(event,"frame_handedness")!=handedness||finite_field(event,"state_epoch_ut_s")!=epoch||
+       text_field(event,"units")!="SI")throw WorkerClientError("shooting frame epoch or units mismatch");
+    if(event.value("route_seed_evidence_revalidated",true)!=false||
+       event.value("mars_stay_continuously_verified",true)!=false)
+        throw WorkerClientError("shooting evidence flags invalid");
+    const auto status=text_field(event,"status"),label=text_field(event,"result_label");
+    static const std::set<std::string> diagnostics={"strict_rejected","budget_exhausted","missing_venus",
+        "venus_boundary_or_radius","mars_stay_failed","coarse_constraints_failed","singular_jacobian",
+        "unsafe_difference","line_search_failed","impulse_bound"};
+    const bool accepted=status=="checkpointed_accepted";
+    if(!accepted&&!diagnostics.contains(status))throw WorkerClientError("shooting completion status invalid");
+    if(label!=(accepted?"independent_nbody_fixed_impulse_checkpointed_only":
+        "independent_nbody_coarse_trial_diagnostic_only")||event.contains("strict")!=accepted)
+        throw WorkerClientError("shooting status label or strict result invalid");
+    if(count(event,"total_probes")!=cap||count(event,"completed_probes")!=previous||
+       count(event,"iterations")>1000||previous==0)
+        throw WorkerClientError("shooting completion probe count invalid");
+    const auto& roles=object_field(event,"role_body_ids");std::set<std::string> ids;
+    for(const char* key:{"central","home","mars","venus"})ids.insert(text_field(roles,key));
+    if(ids.size()!=4||ids.contains(""))throw WorkerClientError("shooting role IDs invalid");
+    const auto& trial=object_field(event,"final_trial");check_state(object_field(trial,"launch_parking_state"));
+    if(!trial.contains("impulses_mps")||!trial.at("impulses_mps").is_array()||trial.at("impulses_mps").size()!=4||
+       !trial.contains("checkpoint_targets_relative")||!trial.at("checkpoint_targets_relative").is_array()||
+       trial.at("checkpoint_targets_relative").size()!=4)throw WorkerClientError("shooting four impulses or targets invalid");
+    for(const auto& target:trial.at("checkpoint_targets_relative"))check_state(target);
+    for(const auto& impulse:trial.at("impulses_mps")){
+        json wrapped={{"vector",impulse}};(void)vector_norm(wrapped,"vector");
+    }
+    const auto& probe=object_field(event,"coarse_diagnostics");
+    if(!probe.contains("burns")||!probe.at("burns").is_array()||probe.at("burns").size()!=4||
+       !probe.contains("checkpoints")||!probe.at("checkpoints").is_array()||probe.at("checkpoints").size()!=4)
+        throw WorkerClientError("shooting four coarse burns and checkpoints required");
+    constexpr const char* names[]={"launch","Mars capture","Mars pre-departure","home return capture"};
+    std::array<double,4> epochs{};double total=0;
+    for(std::size_t i=0;i<4;++i){
+        const auto& burn=probe.at("burns").at(i),&point=probe.at("checkpoints").at(i);
+        epochs[i]=finite_field(burn,"ut_s");const auto magnitude=nonnegative_field(burn,"magnitude_mps");
+        const auto norm=vector_norm(burn,"delta_v_mps");
+        if(!close_scalar(magnitude,norm)||text_field(point,"name")!=names[i]||
+           finite_field(point,"ut_s")!=epochs[i]||(i&&epochs[i]<=epochs[i-1]))
+            throw WorkerClientError("shooting burn or checkpoint order invalid");
+        for(std::size_t axis=0;axis<3;++axis){
+            const double component=trial.at("impulses_mps").at(i).at(axis).get<double>();
+            if(!std::isfinite(component)||!close_scalar(component,burn.at("delta_v_mps").at(axis).get<double>()))
+                throw WorkerClientError("shooting final impulse differs from burn");
+        }
+        (void)vector_norm(point,"signed_position_residual_m");
+        (void)vector_norm(point,"signed_velocity_residual_mps");
+        for(const char* key:{"signed_parking_radius_residual_m","signed_radial_velocity_mps",
+            "signed_tangential_speed_residual_mps"})finite_field(point,key);
+        total+=magnitude;
+    }
+    if(epochs[2]-epochs[1]!=5184000.0||!close_scalar(total,nonnegative_field(probe,"total_charged_delta_v_mps")))
+        throw WorkerClientError("shooting fixed stay or charged burn total invalid");
+    const auto& radius=object_field(probe,"mars_radius");
+    const double low=finite_field(radius,"observed_minimum_m"),high=finite_field(radius,"observed_maximum_m"),
+        interval_low=finite_field(radius,"model_interval_lower_m"),interval_high=finite_field(radius,"model_interval_upper_m");
+    if(low<=0||high<low||interval_low<=0||interval_low>low||interval_high<high||
+       finite_field(radius,"observed_minimum_ut_s")<epochs[1]||
+       finite_field(radius,"observed_maximum_ut_s")>epochs[2])
+        throw WorkerClientError("shooting Mars radius interval invalid");
+    (void)count(probe,"venus_event_count");
+    if(!probe.contains("selected_venus")||!probe.contains("minimum_observed_venus_boundary_margin_m"))
+        throw WorkerClientError("shooting Venus diagnostics missing");
+    if(!probe.at("selected_venus").is_null()){
+        const auto& venus=object_field(probe,"selected_venus");
+        if(text_field(venus,"body_id")!=text_field(roles,"venus")||
+           finite_field(venus,"ut_s")<=epochs[2]||finite_field(venus,"ut_s")>=epochs[3]||
+           nonnegative_field(venus,"distance_m")<=0||!std::isfinite(finite_field(venus,"clearance_m")))
+            throw WorkerClientError("shooting selected Venus event invalid");
+    }
+    if(!probe.at("minimum_observed_venus_boundary_margin_m").is_null())
+        finite_field(probe,"minimum_observed_venus_boundary_margin_m");
+    if(accepted){
+        const auto& strict=object_field(event,"strict");
+        const auto& coarse=object_field(strict,"coarse"),&fine=object_field(strict,"fine");
+        for(const auto* pass:{&coarse,&fine}){
+            json checked=*pass;
+            checked["venus"]["safety_margin_m"]=finite_field(object_field(*pass,"venus"),"clearance_m");
+            (void)check_evaluation_pass(checked,text_field(roles,"venus"));
+            if(!pass->contains("burns")||!pass->at("burns").is_array()||pass->at("burns").size()!=4||
+               !pass->contains("checkpoints")||!pass->at("checkpoints").is_array()||
+               pass->at("checkpoints").size()!=4)
+                throw WorkerClientError("shooting strict four burns and checkpoints required");
+            const auto& burns=pass->at("burns"),&points=pass->at("checkpoints");
+            for(std::size_t i=0;i<4;++i){
+                if(finite_field(burns.at(i),"ut_s")!=epochs[i]||
+                   !close_scalar(nonnegative_field(burns.at(i),"magnitude_mps"),
+                         nonnegative_field(probe.at("burns").at(i),"magnitude_mps")))
+                    throw WorkerClientError("shooting strict burn epochs or magnitudes differ");
+                if(text_field(points.at(i),"name")!=names[i]||finite_field(points.at(i),"ut_s")!=epochs[i])
+                    throw WorkerClientError("shooting strict checkpoint order invalid");
+                for(const char* key:{"position_error_m","velocity_error_mps","parking_radius_error_m",
+                    "radial_velocity_mps","tangential_speed_error_mps"})nonnegative_field(points.at(i),key);
+                (void)vector_norm(burns.at(i),"delta_v_mps");
+                for(std::size_t axis=0;axis<3;++axis)
+                    if(!close_scalar(burns.at(i).at("delta_v_mps").at(axis).get<double>(),
+                             trial.at("impulses_mps").at(i).at(axis).get<double>()))
+                        throw WorkerClientError("shooting strict impulse mismatch");
+            }
+            const auto& venus=object_field(*pass,"venus");
+            if(text_field(venus,"body_id")!=text_field(roles,"venus")||
+               finite_field(venus,"clearance_m")<=0)throw WorkerClientError("shooting strict Venus clearance invalid");
+        }
+        if(!close_scalar(nonnegative_field(strict,"total_charged_delta_v_mps"),total))
+            throw WorkerClientError("shooting strict charged burn total invalid");
+        const auto& disagreement=object_field(strict,"disagreement");
+        for(const char* key:{"maximum_checkpoint_position_m","maximum_checkpoint_velocity_mps",
+            "venus_event_time_s","venus_radius_m","mars_minimum_radius_m","mars_maximum_radius_m",
+            "mars_minimum_time_s","mars_maximum_time_s"})nonnegative_field(disagreement,key);
+    }
+}
 #ifdef _WIN32
 std::wstring wide(const std::string& utf8){
     if(utf8.empty())return {};
@@ -337,6 +531,8 @@ json WorkerEventValidator::accept_line(const std::string& line){
     if((result_kind_==WorkerResultKind::screened_seed&&type=="route")||
        (result_kind_==WorkerResultKind::screened_route&&(type=="candidate"||type=="refinement"))||
        (result_kind_==WorkerResultKind::fixed_impulse_evaluation&&
+        (type=="candidate"||type=="route"||type=="refinement"))||
+       (result_kind_==WorkerResultKind::bounded_shooting&&
         (type=="candidate"||type=="route"||type=="refinement")))
         throw WorkerClientError("event type invalid for result kind");
     if(terminal_)throw WorkerClientError("event after terminal");
@@ -345,9 +541,20 @@ json WorkerEventValidator::accept_line(const std::string& line){
         if(text_field(event,"snapshot_hash")!=snapshot_hash_)throw WorkerClientError("snapshot_hash mismatch");
         if(text_field(event,"source_confidence")!=source_confidence_)throw WorkerClientError("source confidence mismatch");
     }
+    if(result_kind_==WorkerResultKind::bounded_shooting)shooting_schema(event,type);
     if(type=="started"){
         if(started_)throw WorkerClientError("duplicate started event");
-        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+        if(result_kind_==WorkerResultKind::bounded_shooting){
+            reject_shooting_claims(event);
+            if(source_confidence_!="runtime_observed_uncompared"||
+               text_field(event,"source_mode")!="runtime_snapshot"||text_field(event,"units")!="SI"||
+               text_field(event,"result_label")!="independent_nbody_coarse_trial_diagnostic_only")
+                throw WorkerClientError("shooting source or diagnostic label invalid");
+            frame_origin_=text_field(event,"frame_origin");frame_axes_=text_field(event,"frame_axes");
+            frame_handedness_=text_field(event,"frame_handedness");state_epoch_ut_s_=finite_field(event,"state_epoch_ut_s");
+            if(frame_origin_!="system_barycenter"||frame_axes_!="principia_alicesun_frozen_at_capture"||
+               frame_handedness_!="right")throw WorkerClientError("shooting inertial frame invalid");
+        }else if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
             if(source_confidence_!="runtime_observed_uncompared"||
                text_field(event,"source_mode")!="runtime_snapshot"||text_field(event,"units")!="SI"||
                text_field(event,"result_label")!="independent_nbody_fixed_impulse_checkpointed_only"||
@@ -365,9 +572,23 @@ json WorkerEventValidator::accept_line(const std::string& line){
         }
         started_=true;
     }else if(type!="error"&&!(result_kind_==WorkerResultKind::fixed_impulse_evaluation&&type=="cancelled")&&
+             !(result_kind_==WorkerResultKind::bounded_shooting&&type=="cancelled")&&
              !started_)throw WorkerClientError("event before started");
     if(type=="progress"){
-        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+        if(result_kind_==WorkerResultKind::bounded_shooting){
+            reject_shooting_claims(event);
+            const auto completed=count(event,"completed_probes"),total=count(event,"total_probes");
+            if(text_field(event,"phase")!="coarse_probes"||total==0||total>10000||
+               (shooting_total_&&total!=shooting_total_)||completed==0||
+               completed<last_completed_probes_||completed>total||++shooting_progress_events_>128||
+               text_field(event,"frame_origin")!=frame_origin_||
+               text_field(event,"frame_axes")!=frame_axes_||
+               text_field(event,"frame_handedness")!=frame_handedness_||
+               finite_field(event,"state_epoch_ut_s")!=state_epoch_ut_s_||
+               text_field(event,"units")!="SI")
+                throw WorkerClientError("shooting progress regression, frame or cap invalid");
+            shooting_total_=total;last_completed_probes_=completed;
+        }else if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
             const auto completed=count(event,"completed_phases"),total=count(event,"total_phases");
             if(text_field(event,"phase")!="fixed_impulse_evaluation"||total!=1||
                completed<last_completed_phases_||completed>1||
@@ -386,7 +607,24 @@ json WorkerEventValidator::accept_line(const std::string& line){
     if(type=="candidate"&&text_field(event,"status")!="screened_seed")throw WorkerClientError("candidate status invalid");
     if(type=="route")check_route(event,snapshot_hash_,source_confidence_);
     if(type=="complete"||type=="cancelled"){
-        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+        if(result_kind_==WorkerResultKind::bounded_shooting){
+            reject_shooting_claims(event);
+            if(type=="cancelled"){
+                const auto status=text_field(event,"status");
+                if((status!="before_numerical_work"&&status!="before_coarse_probe"&&
+                    status!="during_numerical_work")||
+                   (!started_&&status!="before_numerical_work"))
+                    throw WorkerClientError("shooting cancellation status invalid");
+                if(started_&&(!event.contains("completed_probes")||
+                    count(event,"completed_probes")<last_completed_probes_||
+                    count(event,"completed_probes")>shooting_total_))
+                    throw WorkerClientError("shooting cancelled count outside progress and cap");
+            }else{
+                if(!started_||!shooting_progress_events_)throw WorkerClientError("shooting completed without progress");
+                check_shooting_complete(event,frame_origin_,frame_axes_,frame_handedness_,
+                    state_epoch_ut_s_,shooting_total_,last_completed_probes_);
+            }
+        }else if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
             if(type=="cancelled"){
                 const auto status=text_field(event,"status");
                 if((status!="before_numerical_work"&&status!="after_numerical_work")||
