@@ -114,10 +114,11 @@ public:
         signal_render().connect(sigc::mem_fun(*this,&OrbitView::render),false);
         signal_unrealize().connect(sigc::mem_fun(*this,&OrbitView::release),false);
         auto orbit_drag=Gtk::GestureDrag::create();orbit_drag->set_button(1);
-        orbit_drag->signal_drag_begin().connect([this](double,double){drag_camera_=camera_;});
+        orbit_drag->signal_drag_begin().connect([this](double,double){drag_camera_=camera_;last_orbit_drag_y_=0;});
         orbit_drag->signal_drag_update().connect([this](double dx,double dy){
             camera_.yaw_rad=drag_camera_.yaw_rad+dx*0.004;
-            camera_.tilt_rad=view::drag_tilt(drag_camera_.tilt_rad,dy);queue_render();});
+            camera_.tilt_rad=view::drag_tilt(camera_.tilt_rad,dy-last_orbit_drag_y_);
+            last_orbit_drag_y_=dy;queue_render();});
         add_controller(orbit_drag);
         auto pan_drag=Gtk::GestureDrag::create();pan_drag->set_button(3);
         pan_drag->signal_drag_begin().connect([this](double,double){drag_camera_=camera_;});
@@ -156,6 +157,7 @@ private:
     std::vector<std::vector<Vec3>> paths_;
     GLuint program_=0,vao_=0,vbo_=0;GLint mode_uniform_=-1;
     view::Camera camera_,drag_camera_;
+    double last_orbit_drag_y_=0;
     double scale_=2.4e7;
     std::size_t selected_=1;
     std::array<std::array<float,3>,5> colors_{{{{0.96f,0.75f,0.35f}},{{0.28f,0.78f,0.96f}},{{0.97f,0.43f,0.42f}},{{0.64f,0.81f,0.58f}},{{0.76f,0.61f,0.94f}}}};

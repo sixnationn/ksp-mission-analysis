@@ -25,6 +25,8 @@ void overhead_drag(){
     check(view::drag_tilt(initial,-100)<initial,"upward drag approaches overhead");
     nearly(view::drag_tilt(initial,-1000),0,1e-12,
         "upward drag stops at overhead instead of passing below the plane");
+    check(view::drag_tilt(view::drag_tilt(initial,-1000),20)>0,
+        "downward reversal moves away from an overhead clamp immediately");
     check(view::drag_tilt(initial,1000)<1.57,"downward drag cannot flip under the plane");
 }
 void inclined_fixture(){
