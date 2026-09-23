@@ -46,7 +46,7 @@ If you already have a `snapshot-...json` from this exporter, skip to step 3.
    `KspMission.RuntimeExporter.dll` in that copy at
    `GameData/KspMission/Plugins/`. If you do not have the DLL, see
    [building the exporter](#build-the-in-game-exporter-if-needed).
-2. Start a flight with Principia loaded and press **Ctrl+Alt+F8**. If capture
+2. Start a flight with Principia loaded and press **Ctrl+Shift+F8**. If capture
    succeeds, KSP writes `snapshot-...json` in
    `<your KSP folder>/PluginData/KspMission/`. This is the file to import.
 3. Close the synthetic desktop window. Back in the terminal **inside the
@@ -68,7 +68,7 @@ check that shortcut's target. You want the folder containing `KSP_x64.exe`,
 disposable copy launched by the same shortcut for this test.
 
 Put the exporter DLL in **that copy's** `GameData/KspMission/Plugins/`, launch
-it through your usual Proton shortcut and press the hotkey in a loaded flight.
+it through your usual Proton shortcut and press **Ctrl+Shift+F8** in a loaded flight.
 The JSON appears in **that copy's** `PluginData/KspMission/`. Open the JSON
 with the native Linux `ksp_desktop` using its normal Linux path in step 3.
 Do not look for the exporter or JSON inside Proton's `compatdata/.../pfx`:
@@ -135,13 +135,17 @@ The first build may restore Microsoft's
 through the normal SDK restore. The DLLs under `KSP_x64_Data/Managed` are read
 from your own KSP copy and are not added to this repository.
 
-Start **that same copy** through Proton, load a flight and press Ctrl+Alt+F8.
+Start **that same copy** through Proton, load a flight and press Ctrl+Shift+F8.
 Look for `snapshot-...json` under its `PluginData/KspMission/`, then use the
 [import command above](#ubuntu-import-a-principia-flight). A successful
 `dotnet build` only proves compilation; a loaded-game export and Principia
 comparison still need tester evidence. The Linux exporter command has not
 yet been run on this Windows development host. If it fails, send the full
 terminal error and your `dotnet --version` output.
+
+If you installed an earlier exporter DLL, rebuild it and replace that DLL in
+the same KSP copy. Older DLLs still use `Ctrl+Alt+F8`, which switches virtual
+terminals on Mint before KSP can receive the shortcut.
 
 On **Windows**, use the same repository source and managed DLLs, with a Windows
 path:

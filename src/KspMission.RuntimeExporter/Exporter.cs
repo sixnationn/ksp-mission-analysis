@@ -24,7 +24,7 @@ namespace KspMission.RuntimeExporter
         {
             if (!Input.GetKeyDown(KeyCode.F8) ||
                 !(Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) ||
-                !(Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))) return;
+                !(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) return;
             try
             {
                 var path = Capture();

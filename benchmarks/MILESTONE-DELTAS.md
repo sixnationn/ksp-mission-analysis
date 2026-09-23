@@ -290,3 +290,13 @@ The `milestones/m5-zoom-exporter-ubuntu.json` checkpoint was captured at 19:49:3
 | gpt-6-sol | max | 8,463,765 | 8,236,928 | 226,837 | 20,590 | 12,081 |
 
 Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Linux Mint capture shortcut checkpoint
+
+The `milestones/m5-capture-hotkey.json` checkpoint was captured at 20:52:52 UTC on 23 September 2026, against `milestones/m5-capture-hotkey-start.json` from 20:50:27. This interval includes the preceding answer, the capture shortcut change, documentation, local exporter compilation and coordination. The live response enters at the next refresh.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | max | 803,758 | 779,136 | 24,622 | 4,689 | 2,027 |
+
+Other registered model and effort combinations recorded no new tokens. Input includes cached input, and reasoning is a subset of output. These are recorded session counters, not billing or account-limit usage.

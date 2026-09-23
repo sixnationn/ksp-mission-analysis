@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-23T20:52:52.5580972Z",
+  "generated_at_utc": "2026-09-23T20:50:27.0086263Z",
   "scope": "Registered task sessions only; active response is incomplete until next refresh.",
   "accounting": "Input includes cached input. Reasoning is a subset of output. Total is input plus output; do not add subsets again. Uncached input includes any cache-write input; cache writes are also reported separately.",
   "limitations": "Recorded runtime counters, not an invoice or weekly-limit estimate. Model attribution follows turn_context. No timing or quality claim follows from token counts alone.",
@@ -45,13 +45,13 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "max",
       "sessions": 1,
-      "input_tokens": 28375188,
-      "cached_input_tokens": 27794304,
+      "input_tokens": 27571430,
+      "cached_input_tokens": 27015168,
       "cache_write_input_tokens": 0,
-      "output_tokens": 93111,
-      "reasoning_output_tokens": 53746,
-      "total_tokens": 28468299,
-      "uncached_input_tokens": 580884
+      "output_tokens": 88422,
+      "reasoning_output_tokens": 51719,
+      "total_tokens": 27659852,
+      "uncached_input_tokens": 556262
     },
     {
       "model": "gpt-6-sol",
@@ -128,6 +128,21 @@
       "role": "M0/M1 coordinator",
       "status": "active snapshot",
       "model": "gpt-6-sol",
+      "reasoning_effort": "max",
+      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
+      "as_of": "2026-09-23T20:50:14.625Z",
+      "input_tokens": 27571430,
+      "cached_input_tokens": 27015168,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 88422,
+      "reasoning_output_tokens": 51719,
+      "total_tokens": 27659852,
+      "uncached_input_tokens": 556262
+    },
+    {
+      "role": "M0/M1 coordinator",
+      "status": "active snapshot",
+      "model": "gpt-6-sol",
       "reasoning_effort": "xhigh",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
       "as_of": "2026-09-23T11:03:21.879Z",
@@ -138,21 +153,6 @@
       "reasoning_output_tokens": 375700,
       "total_tokens": 308752373,
       "uncached_input_tokens": 3419903
-    },
-    {
-      "role": "M0/M1 coordinator",
-      "status": "active snapshot",
-      "model": "gpt-6-sol",
-      "reasoning_effort": "max",
-      "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
-      "as_of": "2026-09-23T20:52:39.602Z",
-      "input_tokens": 28375188,
-      "cached_input_tokens": 27794304,
-      "cache_write_input_tokens": 0,
-      "output_tokens": 93111,
-      "reasoning_output_tokens": 53746,
-      "total_tokens": 28468299,
-      "uncached_input_tokens": 580884
     },
     {
       "role": "M1 importer builder",
