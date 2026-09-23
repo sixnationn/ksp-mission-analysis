@@ -135,6 +135,59 @@ RouteEvaluationRequest fixture(const Snapshot& s){
     q.checkpoint_targets_relative[3]=relative(e,"home",post_home,home_return);
     return q;
 }
+RouteProbeTrial probe_trial(const RouteEvaluationRequest& q){return {q.launch_parking_state,q.impulses_mps,q.checkpoint_targets_relative};}
+void probe_tests(const Snapshot& s,const RouteEvaluationRequest& q){
+    const auto context=prepare_route_probe_synthetic_fixture(s,q);
+    const auto trial=probe_trial(q);
+    const auto first=probe_route_trial(context,trial),again=probe_route_trial(context,trial);
+    check(first.result_label=="independent_nbody_coarse_trial_diagnostic_only"&&
+        first.snapshot_hash==s.snapshot_hash&&first.source_confidence==s.confidence&&
+        first.frame_origin==s.frame.origin&&first.state_epoch_ut_s==*s.state_epoch_ut_s,
+        "probe diagnostic source and epoch label");
+    check(first.ephemeris_metadata.snapshot_hash==s.snapshot_hash&&first.burns.size()==4&&
+        first.mars_stay_radius.endpoint_count==2&&first.selected_venus&&
+        !first.venus_events.empty()&&first.minimum_observed_venus_boundary_margin_m,
+        "probe records actual burns, Mars monitor and Venus roots");
+    for(std::size_t i=0;i<4;++i){
+        check(first.checkpoints[i].name==again.checkpoints[i].name&&
+            first.checkpoints[i].signed_position_residual_m.x==again.checkpoints[i].signed_position_residual_m.x&&
+            first.burns[i].delta_v_magnitude_mps==again.burns[i].delta_v_magnitude_mps,
+            "repeated probe deterministic within one context");
+        check(norm(first.checkpoints[i].signed_position_residual_m)<q.fixed_position_tolerance_m,
+            "manufactured probe checkpoint near target");
+    }
+    auto miss=trial;miss.checkpoint_targets_relative[1].position_m.x+=12345;
+    const auto missed=probe_route_trial(context,miss);
+    check(missed.checkpoints[1].signed_position_residual_m.x<first.checkpoints[1].signed_position_residual_m.x-12000&&
+        missed.result_label=="independent_nbody_coarse_trial_diagnostic_only",
+        "safe signed target miss remains diagnostic");
+    auto changed=q;changed.checkpoint_targets_relative[1]=miss.checkpoint_targets_relative[1];
+    rejects([&]{evaluate_fixed_route_synthetic_fixture(s,changed);},"fixed event");
+    auto impulse_miss=trial;impulse_miss.impulses_mps[0].x+=0.05;
+    const auto impulse_result=probe_route_trial(context,impulse_miss);
+    check(norm(impulse_result.checkpoints[1].signed_position_residual_m)>q.fixed_position_tolerance_m&&
+        impulse_result.result_label=="independent_nbody_coarse_trial_diagnostic_only",
+        "safe finite impulse miss remains signed diagnostic");
+    auto strict_miss=q;strict_miss.impulses_mps=impulse_miss.impulses_mps;
+    rejects([&]{evaluate_fixed_route_synthetic_fixture(s,strict_miss);},"fixed event");
+    auto shift=q;shift.route.mars_venus.arrival_ut_s=departure+110000;
+    shift.route.mars_venus.flight_time_s=110000;
+    shift.route.venus_home.departure_ut_s=shift.route.mars_venus.arrival_ut_s;
+    shift.route.venus_home.flight_time_s=home_return-shift.route.venus_home.departure_ut_s;
+    shift.venus_window_halfwidth_s=1;
+    const auto missing_context=prepare_route_probe_synthetic_fixture(s,shift);
+    const auto no_window=probe_route_trial(missing_context,trial);
+    check(!no_window.selected_venus&&no_window.mars_stay_radius.endpoint_count==2,
+        "safe missing Venus window returns diagnostics");
+    auto bad=q;bad.expected_snapshot_hash="stale";
+    rejects([&]{prepare_route_probe_synthetic_fixture(s,bad);},"hash");
+    bad=q;bad.coarse_ephemeris.end_ut_s=home_return-1;
+    rejects([&]{prepare_route_probe_synthetic_fixture(s,bad);},"coverage");
+    auto nonfinite=trial;nonfinite.impulses_mps[0].x=std::numeric_limits<double>::quiet_NaN();
+    rejects([&]{probe_route_trial(context,nonfinite);},"nonfinite");
+    auto unsafe=trial;unsafe.launch_parking_state.position_m=s.bodies[1].state->position_m;
+    rejects([&]{probe_route_trial(context,unsafe);},"unsafe");
+}
 void tests(){
     // A safe screened flyby cannot mask a second, unsafe Venus periapsis later in the route.
     std::vector<EncounterEvent> two_venus{{100,"venus","origin","axes",120000,0,{}},
@@ -145,6 +198,7 @@ void tests(){
     rejects([&]{select_safe_venus_encounter(two_venus,"venus",100,10,110000,200000);},
         "Venus unsafe actual encounter");
     const auto s=source();auto q=fixture(s);
+    probe_tests(s,q);
     auto bad=q;bad.expected_snapshot_hash="stale";rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"hash");
     bad=q;bad.route.mars_venus.snapshot_hash="other";
     rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"leg provenance");
@@ -222,6 +276,13 @@ void tests(){
         runtime_result.result_label=="independent_nbody_fixed_impulse_checkpointed_only"&&
         !runtime_result.route_seed_evidence_revalidated&&!runtime_result.mars_stay_continuously_verified,
         "runtime exact source and bounded label");
+    const auto runtime_probe=prepare_route_probe_runtime(bytes,hash,rq);
+    const auto runtime_diagnostic=probe_route_trial(runtime_probe,probe_trial(rq));
+    check(runtime_diagnostic.snapshot_hash==hash&&runtime_diagnostic.source_confidence=="runtime_observed_uncompared"&&
+        runtime_diagnostic.ephemeris_metadata.frame_origin==loaded.snapshot.frame.origin&&
+        runtime_diagnostic.selected_venus,"runtime probe exact source and actual Venus event");
+    rejects([&]{prepare_route_probe_runtime(bytes,std::string(64,'0'),rq);},"hash");
+    rejects([&]{prepare_route_probe_runtime(bytes+" ",hash,rq);},"hash");
     rejects([&]{evaluate_fixed_route_runtime(bytes,std::string(64,'0'),rq);},"hash");
     rejects([&]{evaluate_fixed_route_runtime(bytes+" ",hash,rq);},"hash");
     auto false_provenance=bytes;
@@ -237,6 +298,8 @@ void tests(){
         leg->snapshot_hash=thick_hash;
     // Caller-supplied zero atmospheres must not override the byte-backed Venus boundary.
     rejects([&]{evaluate_fixed_route_runtime(thick_bytes,thick_hash,thick_q);},"unsafe");
+    const auto thick_probe=prepare_route_probe_runtime(thick_bytes,thick_hash,thick_q);
+    rejects([&]{probe_route_trial(thick_probe,probe_trial(thick_q));},"unsafe");
     rejects([&]{evaluate_fixed_route_synthetic_fixture(loaded.snapshot,rq);},"synthetic_fixture");
     auto untrusted=rq;untrusted.route.home_mars.screening_score_mps=1e99;
     untrusted.route.home_mars.lambert.position_residual_m=1e99;

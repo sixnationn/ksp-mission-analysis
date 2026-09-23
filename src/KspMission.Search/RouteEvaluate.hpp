@@ -2,8 +2,10 @@
 #include "MissionRoute.hpp"
 #include "Spacecraft.hpp"
 #include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace ksp {
 struct RouteEvaluationRequest {
@@ -60,4 +62,53 @@ RouteEvaluationResult evaluate_fixed_route_runtime(const std::string& json_bytes
 // Manufactured synthetic fixtures only. Never pass imported or claimed-runtime states here.
 RouteEvaluationResult evaluate_fixed_route_synthetic_fixture(const Snapshot& snapshot,
     const RouteEvaluationRequest& request);
+
+// One immutable coarse planetary integration, reusable across physical fixed-impulse trials.
+struct RouteProbeTrial {
+    State launch_parking_state;
+    std::array<Vec3,4> impulses_mps{};
+    std::array<State,4> checkpoint_targets_relative{};
+};
+struct RouteProbeCheckpoint {
+    std::string name;double ut_s=0;State spacecraft,relative;
+    Vec3 signed_position_residual_m,signed_velocity_residual_mps;
+    double signed_parking_radius_residual_m=0,signed_radial_velocity_mps=0,
+           signed_tangential_speed_residual_mps=0;
+};
+struct RouteProbeResult {
+    std::string result_label="independent_nbody_coarse_trial_diagnostic_only";
+    std::string snapshot_hash,source_confidence,frame_origin,frame_axes,frame_handedness;
+    std::string units="SI";bool frame_inertial=false;
+    double state_epoch_ut_s=0;
+    Metadata ephemeris_metadata;
+    RouteProbeTrial trial;
+    std::array<RouteProbeCheckpoint,4> checkpoints;
+    std::array<BurnRecord,4> burns;
+    RadiusExtrema mars_stay_radius;
+    std::vector<EncounterEvent> venus_events;
+    std::optional<EncounterEvent> selected_venus;
+    std::optional<double> minimum_observed_venus_boundary_margin_m;
+    std::size_t accepted_steps=0,rejected_steps=0;
+    double total_charged_delta_v_mps=0;
+};
+class RouteProbeContext {
+public:
+    RouteProbeContext(const RouteProbeContext&)=default;
+    RouteProbeContext(RouteProbeContext&&)=default;
+    RouteProbeContext& operator=(const RouteProbeContext&)=delete;
+    RouteProbeContext& operator=(RouteProbeContext&&)=delete;
+private:
+    Snapshot snapshot_;
+    RouteEvaluationRequest baseline_;
+    Ephemeris ephemeris_;
+    RouteProbeContext(Snapshot snapshot,RouteEvaluationRequest baseline,Ephemeris ephemeris)
+        :snapshot_(std::move(snapshot)),baseline_(std::move(baseline)),ephemeris_(std::move(ephemeris)){}
+    friend RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot&,const RouteEvaluationRequest&);
+    friend RouteProbeContext prepare_route_probe_runtime(const std::string&,const std::string&,const RouteEvaluationRequest&);
+    friend RouteProbeResult probe_route_trial(const RouteProbeContext&,const RouteProbeTrial&);
+};
+RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot& snapshot,const RouteEvaluationRequest& baseline);
+RouteProbeContext prepare_route_probe_runtime(const std::string& runtime_json_bytes,const std::string& expected_sha256,
+    const RouteEvaluationRequest& baseline);
+RouteProbeResult probe_route_trial(const RouteProbeContext& context,const RouteProbeTrial& trial);
 }

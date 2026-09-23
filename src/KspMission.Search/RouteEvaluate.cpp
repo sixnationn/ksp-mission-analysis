@@ -256,4 +256,118 @@ RouteEvaluationResult evaluate_fixed_route_runtime(const std::string& json_bytes
     trusted.atmosphere_boundaries=loaded.atmosphere_boundaries;
     return evaluate_core(loaded.snapshot,trusted);
 }
+
+namespace {
+Ephemeris prepare_probe_ephemeris(const Snapshot& snapshot,const RouteEvaluationRequest& baseline){
+    const auto dates=validate(snapshot,baseline);
+    Ephemeris ephemeris;
+    try{ephemeris=integrate(snapshot,baseline.coarse_ephemeris);}
+    catch(const EphemerisError& error){throw RouteEvaluationError(std::string("probe ephemeris integration failed: ")+error.what());}
+    measured_fit(ephemeris.metadata,baseline,dates);
+    if(!cache_compatible(ephemeris.metadata,snapshot,baseline.coarse_ephemeris)||
+       ephemeris.body_ids.size()!=snapshot.bodies.size()||ephemeris.samples.size()!=snapshot.bodies.size())
+        throw RouteEvaluationError("probe ephemeris source or body dimensions mismatch");
+    for(std::size_t i=0;i<snapshot.bodies.size();++i)
+        if(ephemeris.body_ids[i]!=snapshot.bodies[i].id||ephemeris.samples[i].empty()||
+           !finite(ephemeris.samples[i].front())||
+           norm(ephemeris.samples[i].front().position_m-snapshot.bodies[i].state->position_m)!=0||
+           norm(ephemeris.samples[i].front().velocity_mps-snapshot.bodies[i].state->velocity_mps)!=0)
+            throw RouteEvaluationError("probe ephemeris body order or first sample mismatch");
+    return ephemeris;
+}
+RouteProbeCheckpoint probe_checkpoint(const Snapshot& snapshot,const Ephemeris& ephemeris,
+    const RouteEvaluationRequest& baseline,const RouteProbeTrial& trial,const std::string& name,
+    const std::string& id,State spacecraft,double ut,std::size_t index,double altitude){
+    const auto& b=body(snapshot,id);const auto centre=ephemeris.query(id,ut);
+    const State relative{spacecraft.position_m-centre.position_m,spacecraft.velocity_mps-centre.velocity_mps};
+    const double radius=norm(relative.position_m);
+    if(!finite(radius)||radius<=b.radius_m+atmosphere(baseline,id))
+        throw RouteEvaluationError(name+" unsafe parking position");
+    const double radial=dot(relative.position_m,relative.velocity_mps)/radius;
+    const double speed2=dot(relative.velocity_mps,relative.velocity_mps);
+    const double tangential=std::sqrt(std::max(0.0,speed2-radial*radial));
+    RouteProbeCheckpoint out;out.name=name;out.ut_s=ut;out.spacecraft=spacecraft;out.relative=relative;
+    out.signed_position_residual_m=relative.position_m-trial.checkpoint_targets_relative[index].position_m;
+    out.signed_velocity_residual_mps=relative.velocity_mps-trial.checkpoint_targets_relative[index].velocity_mps;
+    out.signed_parking_radius_residual_m=radius-(b.radius_m+altitude);
+    out.signed_radial_velocity_mps=radial;
+    out.signed_tangential_speed_residual_mps=tangential-std::sqrt(b.mu_m3_s2/radius);
+    if(!finite(relative)||!finite(out.signed_position_residual_m)||!finite(out.signed_velocity_residual_mps)||
+       !finite(out.signed_parking_radius_residual_m)||!finite(out.signed_radial_velocity_mps)||
+       !finite(out.signed_tangential_speed_residual_mps))
+        throw RouteEvaluationError(name+" nonfinite probe checkpoint diagnostic");
+    return out;
+}
+}
+RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot& snapshot,const RouteEvaluationRequest& baseline){
+    if(snapshot.confidence!="synthetic_fixture")throw RouteEvaluationError("synthetic fixture probe requires synthetic_fixture confidence");
+    auto ephemeris=prepare_probe_ephemeris(snapshot,baseline);
+    return RouteProbeContext(snapshot,baseline,std::move(ephemeris));
+}
+RouteProbeContext prepare_route_probe_runtime(const std::string& json_bytes,const std::string& expected_sha256,
+    const RouteEvaluationRequest& baseline){
+    RuntimeLoad loaded;
+    try{loaded=read_runtime_snapshot(json_bytes,expected_sha256);}
+    catch(const RuntimeReaderError& error){throw RouteEvaluationError(std::string("runtime source: ")+error.what());}
+    auto trusted=baseline;trusted.atmosphere_boundaries=loaded.atmosphere_boundaries;
+    auto ephemeris=prepare_probe_ephemeris(loaded.snapshot,trusted);
+    return RouteProbeContext(std::move(loaded.snapshot),std::move(trusted),std::move(ephemeris));
+}
+RouteProbeResult probe_route_trial(const RouteProbeContext& context,const RouteProbeTrial& trial){
+    const auto& s=context.snapshot_;const auto& q=context.baseline_;const auto& ephemeris=context.ephemeris_;
+    if(!finite(trial.launch_parking_state))throw RouteEvaluationError("nonfinite probe launch state");
+    for(const auto& impulse:trial.impulses_mps)if(!finite(impulse))throw RouteEvaluationError("nonfinite probe impulse");
+    for(const auto& target:trial.checkpoint_targets_relative)if(!finite(target))throw RouteEvaluationError("nonfinite probe target");
+    const auto dates=validate(s,q);
+    const auto launch_centre=ephemeris.query(dates.home_id,dates.launch);
+    if(norm(trial.launch_parking_state.position_m-launch_centre.position_m)<=
+       body(s,dates.home_id).radius_m+atmosphere(q,dates.home_id))
+        throw RouteEvaluationError("unsafe probe launch parking position");
+    auto settings=q.coarse_spacecraft;
+    settings.burns={{dates.launch,trial.impulses_mps[0]},{dates.arrival,trial.impulses_mps[1]},
+        {dates.departure,trial.impulses_mps[2]},{dates.home,trial.impulses_mps[3]}};
+    settings.atmosphere_boundaries=q.atmosphere_boundaries;settings.safety_margin_m=0;
+    settings.radius_monitor=RadiusMonitor{dates.mars_id,dates.arrival,dates.departure};
+    SpacecraftResult propagation;
+    try{propagation=propagate(s,ephemeris,trial.launch_parking_state,settings);}
+    catch(const SpacecraftError& error){throw RouteEvaluationError(std::string("unsafe or unresolved probe propagation: ")+error.what());}
+    if(!propagation.success||propagation.unsafe||propagation.burns.size()!=4||
+       !propagation.monitored_radius||propagation.monitored_radius->endpoint_count!=2)
+        throw RouteEvaluationError("unsafe or unresolved probe propagation");
+    RouteProbeResult out;out.snapshot_hash=s.snapshot_hash;out.source_confidence=s.confidence;
+    out.frame_origin=s.frame.origin;out.frame_axes=s.frame.axes;out.frame_handedness=s.frame.handedness;
+    out.frame_inertial=s.frame.inertial;
+    out.state_epoch_ut_s=*s.state_epoch_ut_s;out.ephemeris_metadata=ephemeris.metadata;out.trial=trial;
+    out.accepted_steps=propagation.accepted_steps;out.rejected_steps=propagation.rejected_steps;
+    out.mars_stay_radius=*propagation.monitored_radius;
+    const auto& mars=out.mars_stay_radius;
+    for(double value:{mars.minimum_m,mars.maximum_m,mars.minimum_ut_s,mars.maximum_ut_s,
+        mars.model_interval_lower_m,mars.model_interval_upper_m})
+        if(!finite(value))throw RouteEvaluationError("nonfinite Mars probe radius diagnostic");
+    std::copy(propagation.burns.begin(),propagation.burns.end(),out.burns.begin());
+    out.checkpoints[0]=probe_checkpoint(s,ephemeris,q,trial,"launch",dates.home_id,out.burns[0].before,dates.launch,0,q.home_parking_altitude_m);
+    out.checkpoints[1]=probe_checkpoint(s,ephemeris,q,trial,"Mars capture",dates.mars_id,out.burns[1].after,dates.arrival,1,q.mars_parking_altitude_m);
+    out.checkpoints[2]=probe_checkpoint(s,ephemeris,q,trial,"Mars pre-departure",dates.mars_id,out.burns[2].before,dates.departure,2,q.mars_parking_altitude_m);
+    out.checkpoints[3]=probe_checkpoint(s,ephemeris,q,trial,"home return capture",dates.home_id,out.burns[3].after,dates.home,3,q.home_capture_altitude_m);
+    for(const auto& burn:out.burns){
+        if(!finite(burn.delta_v_magnitude_mps)||!finite(burn.delta_v_mps)||
+           !finite(burn.before)||!finite(burn.after))throw RouteEvaluationError("nonfinite probe burn diagnostic");
+        out.total_charged_delta_v_mps+=burn.delta_v_magnitude_mps;
+    }
+    if(!finite(out.total_charged_delta_v_mps))throw RouteEvaluationError("nonfinite probe charged delta-v");
+    const double boundary=body(s,dates.venus_id).radius_m+atmosphere(q,dates.venus_id)+q.venus_safety_margin_m;
+    for(const auto& event:propagation.closest_approaches){
+        if(event.body_id!=dates.venus_id)continue;
+        if(!finite(event.ut_s)||!finite(event.distance_m)||!finite(event.clearance_m)||
+           !finite(event.spacecraft_state))throw RouteEvaluationError("nonfinite Venus event diagnostic");
+        out.venus_events.push_back(event);
+        const double margin=event.distance_m-boundary;
+        if(!finite(margin))throw RouteEvaluationError("nonfinite Venus boundary margin");
+        if(!out.minimum_observed_venus_boundary_margin_m||margin<*out.minimum_observed_venus_boundary_margin_m)
+            out.minimum_observed_venus_boundary_margin_m=margin;
+        if(std::abs(event.ut_s-dates.venus)<=q.venus_window_halfwidth_s&&
+           (!out.selected_venus||event.distance_m<out.selected_venus->distance_m))out.selected_venus=event;
+    }
+    return out;
+}
 }
