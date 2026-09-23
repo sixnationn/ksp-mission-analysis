@@ -1,6 +1,7 @@
 #include "Worker.hpp"
 #include "RuntimeReader.hpp"
 #include "MissionSearch.hpp"
+#include "RouteEvaluate.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -358,5 +359,291 @@ void mission_runtime_mode(){
     check(!has(run(bad.dump()),"started"),"runtime mission malformed exact bytes reject");
     std::filesystem::remove(path);
 }
+namespace eval_fixture {
+constexpr double stay=5184000,arrival=1000000,departure=arrival+stay,encounter=departure+500000,home_return=departure+1000000;
+Snapshot source(){
+    Snapshot s;s.analysis_ready=true;s.snapshot_hash="fixed-route-test-v1";s.confidence="synthetic_fixture";
+    s.state_epoch_ut_s=0;s.frame={"synthetic_barycenter","X,Y,Z","right",true};
+    const double mu=4*std::acos(-1.0)*std::acos(-1.0)*1e18/(stay*stay);
+    s.bodies={{"sun",1e6,1000,State{{0,1e10,0},{0,0,0}},0},
+        {"home",mu,1000,State{{0,0,0},{0,0,0}},0},
+        {"mars",mu,1000,State{{1e8,0,0},{0,0,0}},0},
+        {"venus",1e5,1000,State{{5e7,1e6,0},{0,0,0}},0}};
+    Vec3 centre{},drift{};double total=0;for(const auto& body:s.bodies){total+=body.mu_m3_s2;
+        centre=centre+body.state->position_m*body.mu_m3_s2;drift=drift+body.state->velocity_mps*body.mu_m3_s2;}
+    centre=centre*(1/total);drift=drift*(1/total);
+    for(auto& body:s.bodies){body.state->position_m=body.state->position_m-centre;body.state->velocity_mps=body.state->velocity_mps-drift;}
+    return s;
 }
-int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+std::string runtime_bytes(const Snapshot& s,double venus_atmosphere_m=0){
+    using nlohmann::json;
+    json bodies=json::array();
+    for(const auto& b:s.bodies){
+        const auto p=b.state->position_m,v=b.state->velocity_mps;
+        bodies.push_back({{"id",b.id},{"parent_id",b.id=="sun"?json(nullptr):json("sun")},
+            {"mu_m3_s2",b.mu_m3_s2},{"radius_m",b.radius_m},
+            {"atmosphere_boundary_m",b.id=="venus"?venus_atmosphere_m:0.0},
+            {"state_epoch_ut_s",0.0},{"position_m",{p.x,p.y,p.z}},
+            {"velocity_mps",{v.x,v.y,v.z}}});
+    }
+    return json{{"schema_version",1},{"confidence","runtime_observed_uncompared"},
+        {"capture",{{"exporter_id","test-runtime-shaped"},{"exporter_version","1"},
+            {"game_version","test"},{"save_id","test"},{"capture_ut_s",0.0},
+            {"principia_loaded",true},{"state_source","principia_celestial_from_parent"},
+            {"mods",json::array({{{"id","Principia"},{"version","test"}}})}}},
+        {"frame",{{"origin","system_barycenter"},{"axes","principia_alicesun_frozen_at_capture"},
+            {"handedness","right"},{"inertial",true},{"source_frame","Principia/AliceSun"},
+            {"transform_method","parent_relative_sum_then_com_translation"},{"transform_version","1"}}},
+        {"calendar",{{"day_duration_s",86400},{"display_origin_ut_s",0},
+            {"use_leap_years",false},{"month_lengths",{31,28,31,30,31,30,31,31,30,31,30,31}}}},
+        {"bodies",bodies}}.dump();
+}
+SpacecraftSettings spacecraft(double first,double last,bool strict=false){
+    SpacecraftSettings q;q.start_ut_s=first;q.end_ut_s=last;
+    q.abs_position_tolerance_m=strict?0.1:1;q.abs_velocity_tolerance_mps=strict?1e-5:1e-4;
+    q.relative_tolerance=strict?1e-9:1e-8;q.min_step_s=0.01;q.max_step_s=strict?5000:10000;
+    q.max_accepted_steps=100000;q.safety_margin_m=0;
+    q.atmosphere_boundaries={{"sun",0},{"home",0},{"mars",0},{"venus",0}};return q;
+}
+State arc(const Snapshot& s,const Ephemeris& e,State initial,double first,double last){
+    auto result=propagate(s,e,initial,spacecraft(first,last));
+    if(!result.success)throw std::runtime_error("fixture arc unsafe");return result.final_state;
+}
+Vec3 circle(const Snapshot& s,const Ephemeris& e,const std::string& id,State craft,double ut){
+    const auto body=e.query(id,ut);const auto relative=craft.position_m-body.position_m;
+    const double r=norm(relative),speed=std::sqrt(std::find_if(s.bodies.begin(),s.bodies.end(),
+        [&](const Body& b){return b.id==id;})->mu_m3_s2/r);
+    return body.velocity_mps+Vec3{-relative.y/r*speed,relative.x/r*speed,0};
+}
+struct Shot {Vec3 impulse;State final;};
+Shot shoot(const Snapshot& s,const Ephemeris& e,State initial,double first,double last,Vec3 target,Vec3 guess){
+    State final{};for(int iteration=0;iteration<10;++iteration){
+        auto trial=initial;trial.velocity_mps=trial.velocity_mps+guess;final=arc(s,e,trial,first,last);
+        const Vec3 error=final.position_m-target;if(norm(error)<10)return {guess,final};
+        const double perturb=0.1;auto x=trial,y=trial;x.velocity_mps.x+=perturb;y.velocity_mps.y+=perturb;
+        const auto ex=arc(s,e,x,first,last).position_m,ey=arc(s,e,y,first,last).position_m;
+        const double a=(ex.x-final.position_m.x)/perturb,b=(ey.x-final.position_m.x)/perturb;
+        const double c=(ex.y-final.position_m.y)/perturb,d=(ey.y-final.position_m.y)/perturb;
+        const double det=a*d-b*c;if(std::abs(det)<1)throw std::runtime_error("fixture shooting singular");
+        guess.x-=(d*error.x-b*error.y)/det;guess.y-=(-c*error.x+a*error.y)/det;
+    }
+    throw std::runtime_error("fixture shooting did not converge");
+}
+State relative(const Ephemeris& e,const std::string& id,State craft,double ut){
+    const auto body=e.query(id,ut);return {craft.position_m-body.position_m,craft.velocity_mps-body.velocity_mps};
+}
+RouteEvaluationRequest fixture(const Snapshot& s){
+    RouteEvaluationRequest q;q.expected_snapshot_hash=s.snapshot_hash;q.expected_frame_origin=s.frame.origin;
+    q.expected_frame_axes=s.frame.axes;q.expected_frame_handedness=s.frame.handedness;q.expected_state_epoch_ut_s=0;
+    auto& r=q.route;r.result_label="patched_conic_screened_route";r.route_id="manufactured-fixed-route";
+    r.snapshot_hash=s.snapshot_hash;r.source_confidence=s.confidence;
+    r.home_mars.departure_ut_s=0;r.home_mars.arrival_ut_s=arrival;r.home_mars.flight_time_s=arrival;
+    r.mars_venus.departure_ut_s=departure;r.mars_venus.arrival_ut_s=encounter;r.mars_venus.flight_time_s=500000;
+    r.venus_home.departure_ut_s=encounter;r.venus_home.arrival_ut_s=home_return;r.venus_home.flight_time_s=500000;
+    r.home_mars.departure_body_id="home";r.home_mars.arrival_body_id="mars";
+    r.mars_venus.departure_body_id="mars";r.mars_venus.arrival_body_id="venus";
+    r.venus_home.departure_body_id="venus";r.venus_home.arrival_body_id="home";
+    for(auto* leg:{&r.home_mars,&r.mars_venus,&r.venus_home}){
+        leg->central_body_id="sun";leg->snapshot_hash=s.snapshot_hash;leg->source_confidence=s.confidence;
+    }
+    r.launch_ut_s=0;r.return_ut_s=home_return;r.total_duration_s=home_return;r.fixed_stay_s=stay;
+    q.home_parking_altitude_m=999000;q.mars_parking_altitude_m=999000;q.home_capture_altitude_m=999000;
+    q.fixed_position_tolerance_m=10000;q.fixed_velocity_tolerance_mps=0.1;
+    q.parking_radius_tolerance_m=10000;q.parking_radial_velocity_tolerance_mps=0.01;
+    q.parking_tangential_speed_tolerance_mps=0.01;
+    q.venus_window_halfwidth_s=100000;q.venus_max_encounter_radius_m=2000000;q.venus_safety_margin_m=10000;
+    q.disagreement_position_m=1000;q.disagreement_velocity_mps=0.01;q.disagreement_event_time_s=10;
+    q.disagreement_mars_extremum_radius_m=1000;q.disagreement_mars_extremum_time_s=stay;
+    q.coarse_ephemeris={0,home_return,1000,10,1e-5,100000};
+    q.strict_ephemeris={0,home_return,500,1,1e-6,100000};
+    q.coarse_spacecraft=spacecraft(0,home_return);q.strict_spacecraft=spacecraft(0,home_return,true);
+    q.atmosphere_boundaries=q.coarse_spacecraft.atmosphere_boundaries;
+    const auto e=integrate(s,q.coarse_ephemeris);
+    const auto home=e.query("home",0);q.launch_parking_state={home.position_m+Vec3{1e6,0,0},
+        home.velocity_mps+Vec3{0,std::sqrt(s.bodies[1].mu_m3_s2/1e6),0}};
+    q.checkpoint_targets_relative[0]=relative(e,"home",q.launch_parking_state,0);
+    const auto mars=e.query("mars",arrival),home_end=e.query("home",home_return);
+    const auto first=shoot(s,e,q.launch_parking_state,0,arrival,mars.position_m+Vec3{-1e6,0,0},{98,0,0});
+    q.impulses_mps[0]=first.impulse;
+    auto post_capture=first.final;const auto circular_mars=circle(s,e,"mars",post_capture,arrival);
+    q.impulses_mps[1]=circular_mars-post_capture.velocity_mps;post_capture.velocity_mps=circular_mars;
+    q.checkpoint_targets_relative[1]=relative(e,"mars",post_capture,arrival);
+    const auto pre_departure=arc(s,e,post_capture,arrival,departure);
+    q.checkpoint_targets_relative[2]=relative(e,"mars",pre_departure,departure);
+    const auto second=shoot(s,e,pre_departure,departure,home_return,home_end.position_m+Vec3{1e6,0,0},{-98,0,0});
+    q.impulses_mps[2]=second.impulse;
+    auto post_home=second.final;const auto circular_home=circle(s,e,"home",post_home,home_return);
+    q.impulses_mps[3]=circular_home-post_home.velocity_mps;post_home.velocity_mps=circular_home;
+    q.checkpoint_targets_relative[3]=relative(e,"home",post_home,home_return);
+    return q;
+}
+}
+json evaluation_trial_json(const RouteEvaluationRequest& q){
+    auto v=[](Vec3 x){return json::array({x.x,x.y,x.z});};
+    auto state=[&](State x){return json{{"position_m",v(x.position_m)},{"velocity_mps",v(x.velocity_mps)}};};
+    auto eph=[](const Settings& e){return json{{"start_ut_s",e.start_ut_s},{"end_ut_s",e.end_ut_s},
+        {"step_s",e.step_s},{"max_position_fit_error_m",e.max_position_fit_error_m},
+        {"max_velocity_fit_error_mps",e.max_velocity_fit_error_mps},{"max_steps",e.max_steps}};};
+    auto craft=[](const SpacecraftSettings& s){return json{{"start_ut_s",s.start_ut_s},{"end_ut_s",s.end_ut_s},
+        {"abs_position_tolerance_m",s.abs_position_tolerance_m},
+        {"abs_velocity_tolerance_mps",s.abs_velocity_tolerance_mps},
+        {"relative_tolerance",s.relative_tolerance},{"min_step_s",s.min_step_s},
+        {"max_step_s",s.max_step_s},{"max_accepted_steps",s.max_accepted_steps}};};
+    json impulses=json::array(),targets=json::array();
+    for(auto impulse:q.impulses_mps)impulses.push_back(v(impulse));
+    for(auto target:q.checkpoint_targets_relative)targets.push_back(state(target));
+    return {{"route_seed",{{"central_body_id","sun"},{"home_body_id","home"},
+            {"mars_body_id","mars"},{"venus_body_id","venus"},{"launch_ut_s",q.route.launch_ut_s},
+            {"mars_arrival_ut_s",q.route.home_mars.arrival_ut_s},
+            {"mars_departure_ut_s",q.route.mars_venus.departure_ut_s},
+            {"venus_encounter_ut_s",q.route.mars_venus.arrival_ut_s},
+            {"home_return_ut_s",q.route.return_ut_s},{"fixed_stay_s",q.route.fixed_stay_s},
+            {"snapshot_hash",q.route.snapshot_hash},{"source_confidence",q.route.source_confidence}}},
+        {"launch_parking_state",state(q.launch_parking_state)},
+        {"impulses_mps",impulses},{"checkpoint_targets_relative",targets},
+        {"home_parking_altitude_m",q.home_parking_altitude_m},
+        {"mars_parking_altitude_m",q.mars_parking_altitude_m},
+        {"home_capture_altitude_m",q.home_capture_altitude_m},
+        {"fixed_position_tolerance_m",q.fixed_position_tolerance_m},
+        {"fixed_velocity_tolerance_mps",q.fixed_velocity_tolerance_mps},
+        {"parking_radius_tolerance_m",q.parking_radius_tolerance_m},
+        {"parking_radial_velocity_tolerance_mps",q.parking_radial_velocity_tolerance_mps},
+        {"parking_tangential_speed_tolerance_mps",q.parking_tangential_speed_tolerance_mps},
+        {"venus_window_halfwidth_s",q.venus_window_halfwidth_s},
+        {"venus_max_encounter_radius_m",q.venus_max_encounter_radius_m},
+        {"venus_safety_margin_m",q.venus_safety_margin_m},
+        {"disagreement_position_m",q.disagreement_position_m},
+        {"disagreement_velocity_mps",q.disagreement_velocity_mps},
+        {"disagreement_event_time_s",q.disagreement_event_time_s},
+        {"disagreement_mars_extremum_radius_m",q.disagreement_mars_extremum_radius_m},
+        {"disagreement_mars_extremum_time_s",q.disagreement_mars_extremum_time_s},
+        {"coarse_ephemeris",eph(q.coarse_ephemeris)},{"strict_ephemeris",eph(q.strict_ephemeris)},
+        {"coarse_spacecraft",craft(q.coarse_spacecraft)},{"strict_spacecraft",craft(q.strict_spacecraft)}};
+}
+void evaluation_protocol_failures(){
+    json q={{"protocol_version",1},{"command","evaluate_route"},{"request_id","evaluation-test"},
+        {"source",{{"mode","runtime_snapshot"},{"path","missing.json"},
+            {"expected_snapshot_hash",std::string(64,'0')},
+            {"expected_frame_origin","system_barycenter"},
+            {"expected_frame_axes","principia_alicesun_frozen_at_capture"},
+            {"expected_state_epoch_ut_s",0.0}}},
+        {"trial",json::object()}};
+    const auto out=run(q.dump());
+    check(out.size()==1&&out.back()["type"]=="error"&&out.back()["code"]=="source_read_failed",
+        "evaluate_route missing source rejects before started");
+}
+void evaluation_runtime_round_trip(){
+    const auto synthetic=eval_fixture::source();
+    const auto bytes=eval_fixture::runtime_bytes(synthetic),hash=sha256_hex(bytes);
+    const auto loaded=read_runtime_snapshot(bytes,hash);
+    const auto trial=eval_fixture::fixture(loaded.snapshot);
+    const auto path=std::filesystem::temp_directory_path()/("ksp-evaluate-worker-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".json");
+    auto write=[&](const std::string& content){std::ofstream file(path,std::ios::binary|std::ios::trunc);
+        file.write(content.data(),static_cast<std::streamsize>(content.size()));};
+    write(bytes);
+    json q={{"protocol_version",1},{"command","evaluate_route"},{"request_id","evaluate-positive"},
+        {"source",{{"mode","runtime_snapshot"},{"path",path.string()},
+            {"expected_snapshot_hash",hash},{"expected_frame_origin",loaded.snapshot.frame.origin},
+            {"expected_frame_axes",loaded.snapshot.frame.axes},{"expected_state_epoch_ut_s",0.0}}},
+        {"trial",evaluation_trial_json(trial)}};
+    const auto events=run(q.dump());
+    check(has(events,"started")&&has(events,"progress")&&has(events,"complete")&&
+          !has(events,"error")&&!has(events,"cancelled"),"evaluation positive lifecycle");
+    const auto& complete=events.back();
+    check(complete["result_label"]=="independent_nbody_fixed_impulse_checkpointed_only"&&
+          complete["route_seed_evidence_revalidated"]==false&&
+          complete["mars_stay_continuously_verified"]==false,"evaluation truthful partial label");
+    check(complete["snapshot_hash"]==hash&&complete["source_confidence"]=="runtime_observed_uncompared"&&
+          complete["coarse"]["burns"].size()==4&&complete["strict"]["checkpoints"].size()==4&&
+          complete["total_charged_delta_v_mps"]>0,"evaluation source and actual charged burns");
+    check(complete.contains("role_body_ids")&&complete["role_body_ids"]["home"]=="home"&&
+          complete["role_body_ids"]["mars"]=="mars"&&complete["role_body_ids"]["venus"]=="venus"&&
+          complete["role_body_ids"]["central"]=="sun"&&
+          complete["coarse"]["venus"]["body_id"]=="venus"&&
+          complete["strict"]["venus"]["body_id"]=="venus",
+        "standalone evaluation body roles and Venus event identity");
+    check(complete.dump().size()<=1024*1024&&
+          std::count_if(events.begin(),events.end(),[](const json& event){
+              const auto type=event.value("type",std::string{});
+              return type=="complete"||type=="cancelled"||type=="error";})==1,
+        "evaluation bounded payload and one terminal");
+    for(const auto& event:events)check(event["snapshot_hash"]==hash&&event["request_id"]=="evaluate-positive",
+        "evaluation event provenance");
+    auto bad=q;bad["source"]["expected_frame_axes"]="wrong";
+    check(!has(run(bad.dump()),"started"),"evaluation wrong frame pre-start");
+    bad=q;bad["source"]["expected_state_epoch_ut_s"]=1;
+    check(!has(run(bad.dump()),"started"),"evaluation wrong epoch pre-start");
+    bad=q;bad["trial"]["impulses_mps"][0]=json::array({1,2});
+    check(!has(run(bad.dump()),"started"),"evaluation malformed vector pre-start");
+    bad=q;bad["trial"]["impulses_mps"][0]=json::array({nullptr,0,0});
+    check(!has(run(bad.dump()),"started"),"evaluation nonfinite-style vector pre-start");
+    bad=q;bad["trial"]["coarse_ephemeris"]["max_steps"]=1000001;
+    check(!has(run(bad.dump()),"started"),"evaluation ephemeris cap pre-start");
+    bad=q;bad["trial"]["coarse_spacecraft"]["burns"]=json::array();
+    check(!has(run(bad.dump()),"started"),"evaluation extra burn field pre-start");
+    bad=q;bad["trial"]["venus_impulse_mps"]=json::array({0,1,0});
+    check(!has(run(bad.dump()),"started"),"evaluation hidden impulse field pre-start");
+    bad=q;bad["trial"]["atmosphere_boundaries"]=json::array();
+    check(!has(run(bad.dump()),"started"),"evaluation atmosphere override pre-start");
+    bad=q;bad["source"]["source_confidence"]="synthetic_fixture";
+    check(!has(run(bad.dump()),"started"),"evaluation source confidence claim pre-start");
+    bad=q;bad["trial"]["route_seed"]["source_confidence"]="synthetic_fixture";
+    check(!has(run(bad.dump()),"started"),"evaluation synthetic confidence pre-start");
+    bad=q;bad["trial"]["route_seed"]["mars_departure_ut_s"]=5184001;
+    check(!has(run(bad.dump()),"started"),"evaluation altered stay pre-start");
+    bad=q;bad["trial"]["launch_parking_state"]["position_m"]=json::array({0,0,0});
+    const auto unsafe=run(bad.dump());
+    check(has(unsafe,"error")&&!has(unsafe,"complete"),"evaluation body-centre launch fails terminally");
+    bad=q;bad["trial"]["venus_max_encounter_radius_m"]=1000;
+    const auto no_venus=run(bad.dump());
+    check(has(no_venus,"error")&&!has(no_venus,"complete"),"evaluation unsafe Venus fails terminally");
+    bad=q;bad["trial"]["venus_window_halfwidth_s"]=1e-6;
+    const auto missed_venus=run(bad.dump());
+    check(has(missed_venus,"error")&&!has(missed_venus,"complete"),"evaluation missing true Venus event fails terminally");
+    bad=q;bad["trial"]["disagreement_position_m"]=1e-12;
+    const auto mismatch=run(bad.dump());
+    check(has(mismatch,"error")&&!has(mismatch,"complete"),"evaluation strict disagreement fails terminally");
+    bad=q;bad["trial"]["impulses_mps"][1][0]=trial.impulses_mps[1].x+0.1;
+    bad["trial"]["fixed_position_tolerance_m"]=1e6;
+    bad["trial"]["fixed_velocity_tolerance_mps"]=1.0;
+    bad["trial"]["parking_radius_tolerance_m"]=20000.0;
+    bad["trial"]["parking_radial_velocity_tolerance_mps"]=0.2;
+    bad["trial"]["parking_tangential_speed_tolerance_mps"]=0.2;
+    const auto interior=run(bad.dump());
+    check(has(interior,"error")&&!has(interior,"complete")&&
+          interior.back()["detail"].get<std::string>().find("Mars interior parking radius")!=std::string::npos,
+        "evaluation unsafe interior Mars radius fails terminally");
+    const auto before=run(q.dump(),[](){return true;});
+    check(before.size()==1&&before.back()["type"]=="cancelled","evaluation pre-work cancellation terminal");
+    int polls=0;const auto after=run(q.dump(),[&](){return ++polls>=3;});
+    check(after.back()["type"]=="cancelled"&&!has(after,"complete"),"evaluation post-work cancellation terminal");
+    auto changed=bytes;changed[changed.size()-2]=changed[changed.size()-2]=='0'?'1':'0';
+    const auto changed_events=run(q.dump(),[](){return false;},[&](){write(changed);});
+    check(changed_events.size()==1&&changed_events.back()["code"]=="source_changed"&&
+          !has(changed_events,"started"),"evaluation same-length source rewrite rejects");
+    write(bytes);
+    const auto growth=run(q.dump(),[](){return false;},[&](){write(bytes+" ");});
+    check(growth.size()==1&&growth.back()["code"]=="source_changed"&&
+          !has(growth,"started"),"evaluation appended source rejects");
+    write(changed);check(run(q.dump()).back()["code"]=="source_mismatch","evaluation altered exact source hash rejects");
+    const auto thick=eval_fixture::runtime_bytes(synthetic,1e6),thick_hash=sha256_hex(thick);
+    write(thick);bad=q;bad["source"]["expected_snapshot_hash"]=thick_hash;
+    bad["trial"]["route_seed"]["snapshot_hash"]=thick_hash;
+    const auto thick_events=run(bad.dump());
+    check(has(thick_events,"error")&&!has(thick_events,"complete"),
+        "evaluation source Venus atmosphere enforced");
+    check(run(std::string(1024*1024+1,'x')).back()["code"]=="request_too_large",
+        "worker request line cap before JSON parse");
+    bad=q;bad["request_id"]=std::string(1000,'r');
+    const auto long_id=run(bad.dump());
+    check(long_id.size()==1&&long_id.back()["code"]=="invalid_request"&&
+          long_id.back().dump().size()<1024*1024,
+        "oversized request ID rejected without event amplification");
+    std::cout<<"fixed evaluation charged delta-v m/s="<<complete["total_charged_delta_v_mps"]
+             <<" Venus safety margin m="<<complete["coarse"]["venus"]["safety_margin_m"]
+             <<" terminal bytes="<<complete.dump().size()<<'\n';
+    std::filesystem::remove(path);
+}
+}
+int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();evaluation_protocol_failures();evaluation_runtime_round_trip();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

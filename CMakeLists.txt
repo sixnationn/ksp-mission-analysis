@@ -91,6 +91,7 @@ add_test(NAME ksp_worker_client_tests COMMAND ksp_worker_client_tests $<TARGET_F
 add_library(ksp_route_evaluate src/KspMission.Search/RouteEvaluate.cpp)
 target_include_directories(ksp_route_evaluate PUBLIC src/KspMission.Search)
 target_link_libraries(ksp_route_evaluate PUBLIC ksp_mission_route ksp_spacecraft ksp_runtime_reader)
+target_link_libraries(ksp_worker_protocol PUBLIC ksp_route_evaluate)
 add_executable(ksp_route_evaluate_tests tests/KspMission.RouteEvaluate.Tests/Tests.cpp)
 target_link_libraries(ksp_route_evaluate_tests PRIVATE ksp_route_evaluate)
 add_test(NAME ksp_route_evaluate_tests COMMAND ksp_route_evaluate_tests)

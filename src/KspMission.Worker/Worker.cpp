@@ -3,6 +3,7 @@
 #include "Refine.hpp"
 #include "MissionSearch.hpp"
 #include "RuntimeReader.hpp"
+#include "RouteEvaluate.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 namespace ksp {
 namespace {
@@ -164,6 +166,233 @@ json ephemeris_json(const Metadata& metadata){
         {"max_velocity_fit_error_mps",metadata.max_velocity_fit_error_mps},
         {"measured_max_position_error_m",metadata.measured_max_position_error_m},
         {"measured_max_velocity_error_mps",metadata.measured_max_velocity_error_mps}};
+}
+Vec3 finite_vector3(const json& value){
+    const auto vector=vector3(value);
+    if(!std::isfinite(vector.x)||!std::isfinite(vector.y)||!std::isfinite(vector.z))
+        throw std::invalid_argument("nonfinite SI vector");
+    return vector;
+}
+State state_json_input(const json& value){
+    return {finite_vector3(value.at("position_m")),finite_vector3(value.at("velocity_mps"))};
+}
+Settings evaluation_ephemeris(const json& value){
+    Settings q;q.start_ut_s=required_number(value,"start_ut_s");q.end_ut_s=required_number(value,"end_ut_s");
+    q.step_s=required_number(value,"step_s");q.max_position_fit_error_m=required_number(value,"max_position_fit_error_m");
+    q.max_velocity_fit_error_mps=required_number(value,"max_velocity_fit_error_mps");
+    q.max_steps=required_cap(value,"max_steps",100000);
+    const double steps=(q.end_ut_s-q.start_ut_s)/q.step_s;
+    if(q.step_s<=0||q.end_ut_s<=q.start_ut_s||q.max_position_fit_error_m<=0||
+       q.max_velocity_fit_error_mps<=0||!std::isfinite(steps)||steps<1||steps>q.max_steps)
+        throw std::invalid_argument("evaluation ephemeris settings unbounded or invalid");
+    return q;
+}
+SpacecraftSettings evaluation_spacecraft(const json& value){
+    if(value.contains("burns")||value.contains("atmosphere_boundaries")||value.contains("radius_monitor"))
+        throw std::invalid_argument("extra impulse or atmosphere override forbidden");
+    SpacecraftSettings q;q.start_ut_s=required_number(value,"start_ut_s");q.end_ut_s=required_number(value,"end_ut_s");
+    q.abs_position_tolerance_m=required_number(value,"abs_position_tolerance_m");
+    q.abs_velocity_tolerance_mps=required_number(value,"abs_velocity_tolerance_mps");
+    q.relative_tolerance=required_number(value,"relative_tolerance");
+    q.min_step_s=required_number(value,"min_step_s");q.max_step_s=required_number(value,"max_step_s");
+    q.max_accepted_steps=required_cap(value,"max_accepted_steps",1000000);
+    if(q.end_ut_s<=q.start_ut_s||q.abs_position_tolerance_m<=0||q.abs_velocity_tolerance_mps<=0||
+       q.relative_tolerance<=0||q.min_step_s<=0||q.max_step_s<q.min_step_s)
+        throw std::invalid_argument("evaluation spacecraft settings unbounded or invalid");
+    return q;
+}
+RouteEvaluationRequest evaluation_request(const json& input,const Snapshot& snapshot){
+    const auto& source=input.at("source"),&trial=input.at("trial"),&seed=trial.at("route_seed");
+    if(!trial.is_object()||!seed.is_object())throw std::invalid_argument("evaluation trial and route_seed must be objects");
+    static const std::unordered_set<std::string> trial_fields={
+        "route_seed","launch_parking_state","impulses_mps","checkpoint_targets_relative",
+        "home_parking_altitude_m","mars_parking_altitude_m","home_capture_altitude_m",
+        "fixed_position_tolerance_m","fixed_velocity_tolerance_mps","parking_radius_tolerance_m",
+        "parking_radial_velocity_tolerance_mps","parking_tangential_speed_tolerance_mps",
+        "venus_window_halfwidth_s","venus_max_encounter_radius_m","venus_safety_margin_m",
+        "disagreement_position_m","disagreement_velocity_mps","disagreement_event_time_s",
+        "disagreement_mars_extremum_radius_m","disagreement_mars_extremum_time_s",
+        "coarse_ephemeris","strict_ephemeris","coarse_spacecraft","strict_spacecraft"};
+    for(auto it=trial.begin();it!=trial.end();++it)
+        if(!trial_fields.contains(it.key()))throw std::invalid_argument("unsupported evaluation trial field: "+it.key());
+    static const std::unordered_set<std::string> seed_fields={
+        "central_body_id","home_body_id","mars_body_id","venus_body_id","launch_ut_s",
+        "mars_arrival_ut_s","mars_departure_ut_s","venus_encounter_ut_s","home_return_ut_s",
+        "fixed_stay_s","snapshot_hash","source_confidence"};
+    for(auto it=seed.begin();it!=seed.end();++it)
+        if(!seed_fields.contains(it.key()))throw std::invalid_argument("unsupported route seed field: "+it.key());
+    if(trial.contains("atmosphere_boundaries")||trial.contains("source_confidence")||
+       input.contains("atmosphere_boundaries")||input.contains("source_confidence")||
+       source.contains("atmosphere_boundaries")||source.contains("source_confidence")||
+       seed.contains("atmosphere_boundaries"))
+        throw std::invalid_argument("atmosphere override or confidence claim forbidden");
+    RouteEvaluationRequest q;q.expected_snapshot_hash=source.at("expected_snapshot_hash").get<std::string>();
+    q.expected_frame_origin=source.at("expected_frame_origin").get<std::string>();
+    q.expected_frame_axes=source.at("expected_frame_axes").get<std::string>();
+    q.expected_frame_handedness="right";q.expected_state_epoch_ut_s=required_number(source,"expected_state_epoch_ut_s");
+    if(q.expected_frame_origin!=snapshot.frame.origin||q.expected_frame_axes!=snapshot.frame.axes||
+       q.expected_state_epoch_ut_s!=*snapshot.state_epoch_ut_s)
+        throw std::invalid_argument("evaluation frame or epoch mismatch");
+    auto& route=q.route;route.result_label="patched_conic_screened_route";
+    route.snapshot_hash=seed.at("snapshot_hash").get<std::string>();
+    route.source_confidence=seed.at("source_confidence").get<std::string>();
+    if(route.snapshot_hash!=snapshot.snapshot_hash||route.source_confidence!=snapshot.confidence)
+        throw std::invalid_argument("evaluation route seed source provenance mismatch");
+    const auto central=seed.at("central_body_id").get<std::string>();
+    const auto home=seed.at("home_body_id").get<std::string>();
+    const auto mars=seed.at("mars_body_id").get<std::string>();
+    const auto venus=seed.at("venus_body_id").get<std::string>();
+    for(const auto& id:{central,home,mars,venus})
+        if(std::none_of(snapshot.bodies.begin(),snapshot.bodies.end(),
+            [&](const Body& body){return body.id==id;}))
+            throw std::invalid_argument("evaluation role body absent from source: "+id);
+    const double launch=required_number(seed,"launch_ut_s"),arrival=required_number(seed,"mars_arrival_ut_s"),
+        departure=required_number(seed,"mars_departure_ut_s"),encounter=required_number(seed,"venus_encounter_ut_s"),
+        return_ut=required_number(seed,"home_return_ut_s");
+    route.fixed_stay_s=required_number(seed,"fixed_stay_s");
+    if(route.fixed_stay_s!=5184000||departure-arrival!=5184000||
+       !(launch<arrival&&arrival<departure&&departure<encounter&&encounter<return_ut))
+        throw std::invalid_argument("evaluation fixed stay or dates invalid");
+    route.launch_ut_s=launch;route.return_ut_s=return_ut;
+    auto leg=[&](DatedLegCandidate& output,const std::string& from,const std::string& to,double first,double last){
+        output.central_body_id=central;output.departure_body_id=from;output.arrival_body_id=to;
+        output.snapshot_hash=snapshot.snapshot_hash;output.source_confidence=snapshot.confidence;
+        output.departure_ut_s=first;output.arrival_ut_s=last;output.flight_time_s=last-first;
+    };
+    leg(route.home_mars,home,mars,launch,arrival);leg(route.mars_venus,mars,venus,departure,encounter);
+    leg(route.venus_home,venus,home,encounter,return_ut);
+    q.launch_parking_state=state_json_input(trial.at("launch_parking_state"));
+    const auto& impulses=trial.at("impulses_mps"),&targets=trial.at("checkpoint_targets_relative");
+    if(!impulses.is_array()||impulses.size()!=4||!targets.is_array()||targets.size()!=4)
+        throw std::invalid_argument("exactly four SI impulses and checkpoint targets required");
+    for(std::size_t i=0;i<4;++i){q.impulses_mps[i]=finite_vector3(impulses.at(i));
+        q.checkpoint_targets_relative[i]=state_json_input(targets.at(i));}
+    auto number=[&](const char* key){return required_number(trial,key);};
+    q.home_parking_altitude_m=number("home_parking_altitude_m");q.mars_parking_altitude_m=number("mars_parking_altitude_m");
+    q.home_capture_altitude_m=number("home_capture_altitude_m");q.fixed_position_tolerance_m=number("fixed_position_tolerance_m");
+    q.fixed_velocity_tolerance_mps=number("fixed_velocity_tolerance_mps");
+    q.parking_radius_tolerance_m=number("parking_radius_tolerance_m");
+    q.parking_radial_velocity_tolerance_mps=number("parking_radial_velocity_tolerance_mps");
+    q.parking_tangential_speed_tolerance_mps=number("parking_tangential_speed_tolerance_mps");
+    q.venus_window_halfwidth_s=number("venus_window_halfwidth_s");q.venus_max_encounter_radius_m=number("venus_max_encounter_radius_m");
+    q.venus_safety_margin_m=number("venus_safety_margin_m");q.disagreement_position_m=number("disagreement_position_m");
+    q.disagreement_velocity_mps=number("disagreement_velocity_mps");q.disagreement_event_time_s=number("disagreement_event_time_s");
+    q.disagreement_mars_extremum_radius_m=number("disagreement_mars_extremum_radius_m");
+    q.disagreement_mars_extremum_time_s=number("disagreement_mars_extremum_time_s");
+    for(double value:{q.fixed_position_tolerance_m,q.fixed_velocity_tolerance_mps,q.parking_radius_tolerance_m,
+        q.parking_radial_velocity_tolerance_mps,q.parking_tangential_speed_tolerance_mps,q.venus_window_halfwidth_s,
+        q.venus_max_encounter_radius_m,q.disagreement_position_m,q.disagreement_velocity_mps,q.disagreement_event_time_s,
+        q.disagreement_mars_extremum_radius_m,q.disagreement_mars_extremum_time_s})
+        if(value<=0)throw std::invalid_argument("evaluation tolerance invalid");
+    if(q.home_parking_altitude_m<0||q.mars_parking_altitude_m<0||q.home_capture_altitude_m<0||q.venus_safety_margin_m<0)
+        throw std::invalid_argument("evaluation altitude or safety margin invalid");
+    q.coarse_ephemeris=evaluation_ephemeris(trial.at("coarse_ephemeris"));
+    q.strict_ephemeris=evaluation_ephemeris(trial.at("strict_ephemeris"));
+    q.coarse_spacecraft=evaluation_spacecraft(trial.at("coarse_spacecraft"));
+    q.strict_spacecraft=evaluation_spacecraft(trial.at("strict_spacecraft"));
+    if(q.coarse_ephemeris.start_ut_s>launch||q.coarse_ephemeris.end_ut_s<return_ut||
+       q.strict_ephemeris.start_ut_s>launch||q.strict_ephemeris.end_ut_s<return_ut||
+       q.coarse_spacecraft.start_ut_s!=launch||q.strict_spacecraft.start_ut_s!=launch||
+       q.coarse_spacecraft.end_ut_s!=return_ut||q.strict_spacecraft.end_ut_s!=return_ut)
+        throw std::invalid_argument("evaluation coverage invalid");
+    return q;
+}
+json evaluation_pass_json(const RoutePass& pass){
+    json burns=json::array(),checkpoints=json::array();
+    for(const auto& burn:pass.burns)burns.push_back({{"ut_s",burn.ut_s},{"delta_v_mps",vector_json(burn.delta_v_mps)},
+        {"magnitude_mps",burn.delta_v_magnitude_mps}});
+    for(const auto& check:pass.checkpoints)checkpoints.push_back({{"name",check.name},{"ut_s",check.ut_s},
+        {"position_error_m",check.position_error_m},{"velocity_error_mps",check.velocity_error_mps},
+        {"parking_radius_error_m",check.parking_radius_error_m},{"radial_velocity_mps",check.radial_velocity_mps},
+        {"tangential_speed_error_mps",check.tangential_speed_error_mps}});
+    const auto& r=pass.mars_stay_radius;
+    return {{"burns",burns},{"checkpoints",checkpoints},{"accepted_steps",pass.accepted_steps},
+        {"rejected_steps",pass.rejected_steps},
+        {"venus",{{"body_id",pass.venus.body_id},{"ut_s",pass.venus.ut_s},
+            {"distance_m",pass.venus.distance_m},{"clearance_m",pass.venus.clearance_m}}},
+        {"mars_radius",{{"observed_minimum_m",r.minimum_m},{"observed_minimum_ut_s",r.minimum_ut_s},
+            {"observed_maximum_m",r.maximum_m},{"observed_maximum_ut_s",r.maximum_ut_s},
+            {"model_interval_lower_m",r.model_interval_lower_m},{"model_interval_upper_m",r.model_interval_upper_m},
+            {"endpoint_count",r.endpoint_count},{"root_count",r.root_count}}}};
+}
+void process_evaluation(const json& input,const std::string& id,const WorkerEmit& emit,const WorkerCancel& cancelled,
+    const WorkerAfterRead& after_read){
+    std::string hash,confidence;bool started=false;
+    auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
+        if(!hash.empty()){event["snapshot_hash"]=hash;event["source_confidence"]=confidence;}emit(event);};
+    auto error=[&](const char* code,const std::string& detail){send({{"type","error"},{"code",code},{"detail",detail}});};
+    try{
+        const auto& source=input.at("source");
+        if(!source.is_object())throw std::invalid_argument("evaluation source must be an object");
+        static const std::unordered_set<std::string> source_fields={
+            "mode","path","expected_snapshot_hash","expected_frame_origin",
+            "expected_frame_axes","expected_state_epoch_ut_s"};
+        for(auto it=source.begin();it!=source.end();++it)
+            if(!source_fields.contains(it.key()))throw std::invalid_argument("unsupported evaluation source field: "+it.key());
+        if(source.at("mode")!="runtime_snapshot")throw std::invalid_argument("evaluate_route requires runtime_snapshot");
+        const auto path=source.at("path").get<std::string>();
+        const auto expected=source.at("expected_snapshot_hash").get<std::string>();
+        if(path.empty()||!lower_sha256(expected))throw std::invalid_argument("runtime path and lowercase SHA-256 required");
+        std::ifstream file(path,std::ios::binary|std::ios::ate);
+        if(!file){error("source_read_failed","cannot open runtime snapshot");return;}
+        const auto length=file.tellg();constexpr std::streamoff limit=16*1024*1024;
+        if(length<0){error("source_read_failed","cannot size runtime snapshot");return;}
+        if(length>limit){error("source_too_large","runtime snapshot exceeds 16 MiB");return;}
+        std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+        if(!file.read(bytes.data(),length)){error("source_read_failed","cannot read exact runtime bytes");return;}
+        if(after_read)after_read();
+        file.clear();file.seekg(0,std::ios::end);
+        if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed");return;}
+        std::string second(bytes.size(),'\0');file.clear();file.seekg(0);
+        if(!file.read(second.data(),length)||second!=bytes){error("source_changed","runtime snapshot bytes changed during read");return;}
+        file.clear();file.seekg(0,std::ios::end);
+        if(!file||file.tellg()!=length){error("source_changed","runtime snapshot size changed before acceptance");return;}
+        if(sha256_hex(bytes)!=expected){error("source_mismatch","exact runtime bytes hash mismatch");return;}
+        RuntimeLoad loaded;
+        try{loaded=read_runtime_snapshot(bytes,expected);}catch(const RuntimeReaderError& issue){error("invalid_source",issue.what());return;}
+        hash=loaded.snapshot.snapshot_hash;confidence=loaded.snapshot.confidence;
+        const auto request=evaluation_request(input,loaded.snapshot);
+        if(cancelled()){send({{"type","cancelled"},{"status","before_numerical_work"}});return;}
+        send({{"type","started"},{"source_mode","runtime_snapshot"},{"frame_origin",loaded.snapshot.frame.origin},
+            {"frame_axes",loaded.snapshot.frame.axes},{"frame_handedness",loaded.snapshot.frame.handedness},
+            {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},{"units","SI"},
+            {"result_label","independent_nbody_fixed_impulse_checkpointed_only"},
+            {"non_interruptible_stages",json::array({"coarse_and_strict_numerical_evaluation"})}});
+        started=true;
+        send({{"type","progress"},{"phase","fixed_impulse_evaluation"},{"completed_phases",0},{"total_phases",1}});
+        if(cancelled()){send({{"type","cancelled"},{"status","before_numerical_work"}});return;}
+        const auto result=evaluate_fixed_route_runtime(bytes,expected,request);
+        if(cancelled()){send({{"type","cancelled"},{"status","after_numerical_work"}});return;}
+        send({{"type","progress"},{"phase","fixed_impulse_evaluation"},{"completed_phases",1},{"total_phases",1}});
+        const auto venus_boundary=std::find_if(loaded.atmosphere_boundaries.begin(),loaded.atmosphere_boundaries.end(),
+            [&](const AtmosphereBoundary& a){return a.body_id==request.route.mars_venus.arrival_body_id;});
+        const auto venus_body=std::find_if(loaded.snapshot.bodies.begin(),loaded.snapshot.bodies.end(),
+            [&](const Body& b){return b.id==request.route.mars_venus.arrival_body_id;});
+        const double safety=venus_body->radius_m+venus_boundary->altitude_m+request.venus_safety_margin_m;
+        auto coarse=evaluation_pass_json(result.coarse),strict=evaluation_pass_json(result.strict);
+        coarse["venus"]["safety_margin_m"]=result.coarse.venus.distance_m-safety;
+        strict["venus"]["safety_margin_m"]=result.strict.venus.distance_m-safety;
+        send({{"type","complete"},{"result_label",result.result_label},
+            {"role_body_ids",{{"central",request.route.home_mars.central_body_id},
+                {"home",request.route.home_mars.departure_body_id},
+                {"mars",request.route.home_mars.arrival_body_id},
+                {"venus",request.route.mars_venus.arrival_body_id}}},
+            {"route_seed_evidence_revalidated",result.route_seed_evidence_revalidated},
+            {"mars_stay_continuously_verified",result.mars_stay_continuously_verified},
+            {"frame_origin",loaded.snapshot.frame.origin},{"frame_axes",loaded.snapshot.frame.axes},
+            {"frame_handedness",loaded.snapshot.frame.handedness},{"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},
+            {"units","SI"},{"force_model","newtonian_point_mass"},
+            {"coarse",coarse},{"strict",strict},{"total_charged_delta_v_mps",result.total_charged_delta_v_mps},
+            {"disagreement",{{"maximum_checkpoint_position_m",result.maximum_checkpoint_position_disagreement_m},
+                {"maximum_checkpoint_velocity_mps",result.maximum_checkpoint_velocity_disagreement_mps},
+                {"venus_event_time_s",result.venus_event_time_disagreement_s},
+                {"venus_radius_m",result.venus_radius_disagreement_m},
+                {"mars_minimum_radius_m",result.mars_minimum_radius_disagreement_m},
+                {"mars_maximum_radius_m",result.mars_maximum_radius_disagreement_m},
+                {"mars_minimum_time_s",result.mars_minimum_time_disagreement_s},
+                {"mars_maximum_time_s",result.mars_maximum_time_disagreement_s}}}});
+    }catch(const RouteEvaluationError& issue){error(started?"evaluation_failed":"invalid_request",issue.what());}
+    catch(const std::exception& issue){error(started?"work_failed":"invalid_request",issue.what());}
 }
 void process_mission(const json& input,const std::string& id,const WorkerEmit& emit,const WorkerCancel& cancelled,
                      const WorkerAfterRead& after_read){
@@ -342,6 +571,8 @@ bool is_cancel_line(const std::string& line,const std::string& request_id){
 
 void process_start_line(const std::string& line,const WorkerEmit& emit,const WorkerCancel& cancelled,
                         const WorkerAfterRead& after_runtime_bytes_read_for_test){
+    if(line.size()>1024*1024){emit({{"protocol_version",1},{"request_id",""},
+        {"type","error"},{"code","request_too_large"},{"detail","request line exceeds 1 MiB"}});return;}
     json input=json::parse(line,nullptr,false);std::string id,source_hash,source_confidence;
     auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
         if(!source_hash.empty()){event["snapshot_hash"]=source_hash;event["source_confidence"]=source_confidence;}
@@ -349,12 +580,21 @@ void process_start_line(const std::string& line,const WorkerEmit& emit,const Wor
     auto error=[&](const char* code,const std::string& detail){send({{"type","error"},{"code",code},{"detail",detail}});};
     if(input.is_discarded()){error("invalid_json","malformed JSON line");return;}
     if(!input.is_object()){error("invalid_request","request must be an object");return;}
-    if(input.contains("request_id")&&input["request_id"].is_string())id=input["request_id"].get<std::string>();
+    if(input.contains("request_id")&&input["request_id"].is_string()){
+        const auto candidate=input["request_id"].get<std::string>();
+        if(candidate.size()>128){
+            emit({{"protocol_version",1},{"request_id",""},{"type","error"},
+                {"code","invalid_request"},{"detail","request_id exceeds 128 bytes"}});return;
+        }
+        id=candidate;
+    }
     if(!input.contains("protocol_version")||!input["protocol_version"].is_number_integer()||input["protocol_version"]!=1){error("unsupported_version","protocol_version must be 1");return;}
     if(id.empty()||!input.contains("command")||!input["command"].is_string()){
         error("invalid_request","command and nonempty request_id required");return;}
     if(input["command"]=="start_mission"){
         process_mission(input,id,emit,cancelled,after_runtime_bytes_read_for_test);return;}
+    if(input["command"]=="evaluate_route"){
+        process_evaluation(input,id,emit,cancelled,after_runtime_bytes_read_for_test);return;}
     if(input["command"]!="start"){error("invalid_request","unsupported command");return;}
     bool work_started=false;
     try{
