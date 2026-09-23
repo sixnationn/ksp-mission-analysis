@@ -3,6 +3,7 @@
 #include "WorkerClient.hpp"
 #include "StudyReport.hpp"
 #include "EvaluationReport.hpp"
+#include "ShootingWorkflow.hpp"
 #include <epoxy/gl.h>
 #include <glibmm/ustring.h>
 #include <sigc++/sigc++.h>
@@ -229,6 +230,7 @@ public:
         right_(Gtk::Orientation::VERTICAL,10),center_(Gtk::Orientation::VERTICAL,0),bottom_(Gtk::Orientation::VERTICAL,8),
         selection_("Selected: Haven"),status_("Synthetic visualization ready · camera changes do not affect the trajectory"),
         import_("Import runtime JSON"),search_("Screen runtime mission"),evaluate_("Evaluate fixed trial"),
+        shoot_("Shoot nearby trial"),
         cancel_("Cancel worker"),export_("Save report"),
         worker_path_(std::move(worker_path)){
         set_title("KSP Mission Analysis · Synthetic study");set_default_size(1440,880);
@@ -253,7 +255,7 @@ private:
     Gtk::Box body_rows_{Gtk::Orientation::VERTICAL,7},fields_{Gtk::Orientation::VERTICAL,1};
     Gtk::Box form_{Gtk::Orientation::VERTICAL,5},route_rows_{Gtk::Orientation::VERTICAL,4};
     Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_,worker_status_;
-    Gtk::Entry path_,hash_;Gtk::Button import_,search_,evaluate_,cancel_,export_;
+    Gtk::Entry path_,hash_;Gtk::Button import_,search_,evaluate_,shoot_,cancel_,export_;
     Gtk::ProgressBar progress_;
     std::map<std::string,Gtk::Entry*> inputs_;
     WorkerClient worker_;
@@ -262,8 +264,9 @@ private:
     std::optional<json> submitted_request_,terminal_event_;
     std::vector<json> evaluation_events_;
     std::string worker_path_,loaded_path_,loaded_hash_,request_id_;
+    std::string shooting_stages_;
     std::size_t request_sequence_=0;
-    bool pending_close_=false,terminal_seen_=false,active_evaluation_=false;
+    bool pending_close_=false,terminal_seen_=false,active_evaluation_=false,active_shooting_=false;
     std::string source_details_="Synthetic M2 fixture · no KSP or Principia runtime import";
     bool runtime_loaded_=false;
     void show_import_error(const std::string& detail){
@@ -284,7 +287,8 @@ private:
             runtime_source_=loaded;snapshot_=loaded.snapshot;ephemeris_=std::move(prepared.preview);
             loaded_path_=filename;loaded_hash_=expected;
             submitted_request_.reset();terminal_event_.reset();evaluation_events_.clear();
-            active_evaluation_=false;export_.set_sensitive(false);
+            active_evaluation_=false;active_shooting_=false;shooting_stages_.clear();
+            export_.set_sensitive(false);
             source_details_=details;runtime_loaded_=true;view_.reload();refresh_source();select(snapshot_.bodies.size()>1?1:0);
             for(const auto& key:{"central","home","mars","venus","leg1_min","leg1_max","leg2_min","leg2_max",
                 "leg3_min","leg3_max","ephemeris_end","home_parking","mars_parking","home_capture",
@@ -292,7 +296,8 @@ private:
             inputs_.at("launch_start")->set_text(fixed(loaded.capture_ut_s,0));
             inputs_.at("launch_end")->set_text(fixed(loaded.capture_ut_s,0));
             inputs_.at("trial_path")->set_text("");
-            search_.set_sensitive(true);evaluate_.set_sensitive(true);cancel_.set_sensitive(false);progress_.set_fraction(0);
+            search_.set_sensitive(true);evaluate_.set_sensitive(true);shoot_.set_sensitive(true);
+            cancel_.set_sensitive(false);progress_.set_fraction(0);
             while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
             route_rows_.append(*label("No ranked screened routes for this source.","small"));
             worker_status_.set_text("Runtime snapshot ready · configure exact roles and SI grids to screen");
@@ -388,14 +393,17 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         auto* contents=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,12);
         contents->append(fields_);contents->append(form_);scroll->set_child(*contents);
         build_mission_form();
-        right_.append(*label("Screened routes or a supplied fixed-impulse checkpoint trial · independent Newtonian model · SI / UT","small"));
-        search_.set_sensitive(false);evaluate_.set_sensitive(false);export_.set_sensitive(false);
+        right_.append(*label("Screened routes, fixed-trial evaluation, or bounded nearby-trial shooting · independent Newtonian model · SI / UT","small"));
+        search_.set_sensitive(false);evaluate_.set_sensitive(false);shoot_.set_sensitive(false);
+        export_.set_sensitive(false);
         cancel_.set_sensitive(false);
         search_.signal_clicked().connect([this]{start_mission();});
         evaluate_.signal_clicked().connect([this]{start_evaluation();});
+        shoot_.signal_clicked().connect([this]{start_shooting();});
         cancel_.signal_clicked().connect([this]{worker_.cancel();worker_status_.set_text("Cancellation requested · waiting for worker checkpoint");});
         export_.signal_clicked().connect([this]{save_report();});
-        right_.append(search_);right_.append(evaluate_);right_.append(cancel_);right_.append(export_);
+        right_.append(search_);right_.append(evaluate_);right_.append(shoot_);
+        right_.append(cancel_);right_.append(export_);
     }
     void build_bottom(){
         bottom_.add_css_class("bottom");bottom_.append(*label("CANDIDATES & WORKER","eyebrow"));
@@ -441,7 +449,11 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         add_input("max_cells","Prospective Lambert cell cap (≤100000)","100000");
         add_input("max_routes","Retained route cap (≤128)","50");
         add_input("timeout","Worker deadline (s)","300");
-        add_input("trial_path","Fixed-impulse trial JSON path (advanced)");
+        add_input("trial_path","Fixed-impulse trial JSON path for evaluation or bounded shooting (advanced)");
+        add_input("shoot_fd","Shooting finite-difference impulse (m/s)","0.01");
+        add_input("shoot_impulse_cap","Shooting per-impulse cap (m/s) · enter explicitly");
+        add_input("shoot_iterations","Shooting iteration cap (≤1000)","6");
+        add_input("shoot_probes","Shooting probe cap (≤10000)","80");
         add_input("report_path","Report output path (JSON)");
         form_.append(*label("Parking-orbit stay: exactly 5,184,000 SI s · return: parking capture","small"));
     }
@@ -539,9 +551,10 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             options.cancel_grace=std::chrono::milliseconds(750);
             if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
             submitted_request_=request;terminal_event_.reset();evaluation_events_.clear();
-            active_evaluation_=false;export_.set_sensitive(false);
+            active_evaluation_=false;active_shooting_=false;shooting_stages_.clear();
+            export_.set_sensitive(false);
             terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);
-            evaluate_.set_sensitive(false);cancel_.set_sensitive(true);
+            evaluate_.set_sensitive(false);shoot_.set_sensitive(false);cancel_.set_sensitive(true);
             import_.set_sensitive(false);worker_status_.set_text("Worker starting · "+request_id_);
             while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
             route_rows_.append(*label("Screening runtime mission · no final routes yet","small"));
@@ -585,14 +598,57 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             options.timeout=std::chrono::seconds(positive_integer("timeout",1800));
             options.cancel_grace=std::chrono::milliseconds(750);
             if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
-            active_evaluation_=true;submitted_request_=request;terminal_event_.reset();
+            active_evaluation_=true;active_shooting_=false;shooting_stages_.clear();
+            submitted_request_=request;terminal_event_.reset();
             evaluation_events_.clear();export_.set_sensitive(false);
             terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);
-            evaluate_.set_sensitive(false);cancel_.set_sensitive(true);import_.set_sensitive(false);
+            evaluate_.set_sensitive(false);shoot_.set_sensitive(false);
+            cancel_.set_sensitive(true);import_.set_sensitive(false);
             while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
             route_rows_.append(*label("Evaluating supplied fixed impulses · checkpointed result pending","small"));
             worker_status_.set_text("Fixed-impulse worker starting · "+request_id_);
         }catch(const std::exception& error){worker_status_.set_text(std::string("Fixed trial rejected: ")+error.what()+" · previous result retained");}
+    }
+    void start_shooting(){
+        try{
+            if(worker_.running())throw std::runtime_error("Worker is already running");
+            if(!runtime_loaded_||!runtime_source_)throw std::runtime_error("Import a runtime snapshot first");
+            if(path_.get_text().raw()!=loaded_path_||hash_.get_text().raw()!=loaded_hash_)
+                throw std::runtime_error("Source path or hash changed; import the snapshot again");
+            const auto trial_path=field("trial_path");
+            if(trial_path.empty())throw std::runtime_error("Enter a fixed-date four-impulse trial JSON path");
+            std::ifstream file(trial_path,std::ios::binary|std::ios::ate);
+            if(!file)throw std::runtime_error("Shooting trial JSON cannot be opened");
+            const auto length=file.tellg();
+            if(length<=0||length>1024*1024)throw std::runtime_error("Shooting trial JSON must be 1 MiB or less");
+            std::string trial_bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
+            if(!file.read(trial_bytes.data(),length))throw std::runtime_error("Shooting trial JSON read incomplete");
+            const ShootingSource source{loaded_path_,loaded_hash_,snapshot_.confidence,
+                snapshot_.frame.origin,snapshot_.frame.axes,*snapshot_.state_epoch_ut_s};
+            const ShootingLimits limits{number("shoot_fd"),number("shoot_impulse_cap"),
+                positive_integer("shoot_iterations",1000),positive_integer("shoot_probes",10000)};
+            request_id_="desktop-shoot-"+std::to_string(++request_sequence_);
+            const auto request=build_shooting_request(source,trial_bytes,limits,request_id_);
+            ClientOptions options;options.executable_path=worker_path_;options.request_line=request.dump();
+            options.request_id=request_id_;options.expected_snapshot_hash=loaded_hash_;
+            options.expected_source_confidence="runtime_observed_uncompared";
+            options.result_kind=WorkerResultKind::bounded_shooting;options.max_retained_events=160;
+            options.timeout=std::chrono::seconds(positive_integer("timeout",1800));
+            options.cancel_grace=std::chrono::milliseconds(750);
+            if(!worker_.start(std::move(options)))throw std::runtime_error("Worker already active");
+            active_evaluation_=false;active_shooting_=true;shooting_stages_.clear();
+            submitted_request_=request;
+            terminal_event_.reset();evaluation_events_.clear();export_.set_sensitive(false);
+            terminal_seen_=false;progress_.set_fraction(0);search_.set_sensitive(false);
+            evaluate_.set_sensitive(false);shoot_.set_sensitive(false);
+            cancel_.set_sensitive(true);import_.set_sensitive(false);
+            while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+            route_rows_.append(*label("Shooting supplied fixed-date trial · bounded independent n-body probes pending","small"));
+            worker_status_.set_text("Shooting worker starting · "+request_id_);
+        }catch(const std::exception& error){
+            worker_status_.set_text(std::string("Nearby trial rejected: ")+error.what()+
+                " · previous result retained");
+        }
     }
     void show_ranked(const json& event){
         while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
@@ -646,19 +702,31 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             fixed(disagreement.at("maximum_checkpoint_position_m").get<double>(),3)+" m / "+
             fixed(disagreement.at("maximum_checkpoint_velocity_mps").get<double>(),6)+" m/s","small"));
     }
+    void show_shooting(const json& event){
+        while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+        route_rows_.append(*label(present_shooting_completion(event).text,"small"));
+    }
     void save_report(){
         try{
             if(!submitted_request_||!terminal_event_||worker_.running())
                 throw std::runtime_error("Wait for a completed runtime mission worker result");
             const auto destination=field("report_path");
             if(destination.empty())throw std::runtime_error("Enter a study report output path");
+            if(active_shooting_&&
+               (path_.get_text().raw()!=loaded_path_||hash_.get_text().raw()!=loaded_hash_))
+                throw std::runtime_error("Source path or hash changed; import again before saving");
             std::ifstream file(loaded_path_,std::ios::binary|std::ios::ate);
             if(!file)throw std::runtime_error("Runtime source cannot be reopened");
             const auto length=file.tellg();
             if(length<0||length>16*1024*1024)throw std::runtime_error("Runtime source size invalid");
             std::string bytes(static_cast<std::size_t>(length),'\0');file.seekg(0);
             if(!file.read(bytes.data(),length))throw std::runtime_error("Runtime source read incomplete");
-            if(active_evaluation_){
+            if(active_shooting_){
+                const auto report=compose_shooting_report(bytes,loaded_hash_,
+                    *submitted_request_,evaluation_events_);
+                save_shooting_report(report,std::filesystem::path(destination));
+                worker_status_.set_text("Saved bounded shooting result · "+destination);
+            }else if(active_evaluation_){
                 const auto report=compose_fixed_evaluation_report(bytes,loaded_hash_,
                     *submitted_request_,evaluation_events_);
                 save_fixed_evaluation_report(report,std::filesystem::path(destination));
@@ -674,13 +742,34 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
     bool poll_worker(){
         for(const auto& event:worker_.drain()){
             const auto type=event.value("type",std::string{});
-            if(active_evaluation_&&type!="client_error")evaluation_events_.push_back(event);
-            if(type=="started")worker_status_.set_text(active_evaluation_?
-                "Fixed-impulse evaluation started · checkpointed independent n-body · SI / UT":
-                "Worker started · "+event.value("source_mode",std::string{})+
-                    " · independent "+event.value("force_model",std::string{})+" · SI / UT");
+            if((active_evaluation_||active_shooting_)&&type!="client_error")evaluation_events_.push_back(event);
+            if(type=="started"){
+                if(active_shooting_){
+                    std::string stages;
+                    if(event.contains("non_interruptible_stages")&&event.at("non_interruptible_stages").is_array())
+                        for(const auto& stage:event.at("non_interruptible_stages")){
+                            if(!stages.empty())stages+=" · ";
+                            const auto name=stage.get<std::string>();
+                            if(name=="planetary_ephemeris_integration")stages+="planetary ephemeris integration";
+                            else if(name=="single_spacecraft_probe")stages+="one spacecraft probe";
+                            else if(name=="strict_coarse_and_fine_repropagation")stages+="coarse and strict repropagation";
+                            else stages+=name;
+                        }
+                    shooting_stages_=std::move(stages);
+                    worker_status_.set_text("Nearby trial shooting started · SI / UT · noninterruptible: "+shooting_stages_);
+                }else worker_status_.set_text(active_evaluation_?
+                    "Fixed-impulse evaluation started · checkpointed independent n-body · SI / UT":
+                    "Worker started · "+event.value("source_mode",std::string{})+
+                        " · independent "+event.value("force_model",std::string{})+" · SI / UT");
+            }
             else if(type=="progress"){
-                if(active_evaluation_){
+                if(active_shooting_){
+                    const auto done=event.at("completed_probes").get<std::size_t>();
+                    const auto total=event.at("total_probes").get<std::size_t>();
+                    progress_.set_fraction(total?static_cast<double>(done)/total:0);
+                    worker_status_.set_text("Nearby trial probes "+std::to_string(done)+" / "+
+                        std::to_string(total)+" · noninterruptible: "+shooting_stages_);
+                }else if(active_evaluation_){
                     const auto done=event.at("completed_phases").get<std::size_t>();
                     const auto total=event.at("total_phases").get<std::size_t>();
                     progress_.set_fraction(total?static_cast<double>(done)/total:0);
@@ -695,8 +784,21 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
             }else if(type=="route")worker_status_.set_text("Provisional screened route received · final ranking pending");
             else if(type=="complete"||type=="cancelled"){
                 terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
-                evaluate_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
-                if(active_evaluation_){
+                evaluate_.set_sensitive(runtime_loaded_);shoot_.set_sensitive(runtime_loaded_);
+                import_.set_sensitive(true);
+                if(active_shooting_){
+                    while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
+                    if(type=="complete"){
+                        show_shooting(event);terminal_event_=event;export_.set_sensitive(true);
+                        worker_status_.set_text(event.at("status")=="checkpointed_accepted"?
+                            "Completed · checkpointed nearby-trial result shown":
+                            "Completed · diagnostic non-success shown, report available");
+                    }else{
+                        route_rows_.append(*label("Nearby trial cancelled · no completed shooting report","small"));
+                        terminal_event_.reset();export_.set_sensitive(false);
+                        worker_status_.set_text("Nearby trial cancelled · no report available");
+                    }
+                }else if(active_evaluation_){
                     while(auto* child=route_rows_.get_first_child())route_rows_.remove(*child);
                     if(type=="complete"){
                         show_evaluation(event);terminal_event_=event;export_.set_sensitive(true);
@@ -714,7 +816,8 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
                 }
             }else if(type=="error"||type=="client_error"){
                 terminal_seen_=true;cancel_.set_sensitive(false);search_.set_sensitive(runtime_loaded_);
-                evaluate_.set_sensitive(runtime_loaded_);import_.set_sensitive(true);
+                evaluate_.set_sensitive(runtime_loaded_);shoot_.set_sensitive(runtime_loaded_);
+                import_.set_sensitive(true);
                 terminal_event_.reset();export_.set_sensitive(false);
                 worker_status_.set_text("Worker error "+event.value("code",std::string("unknown"))+": "+
                     event.value("detail",std::string("no detail")));
