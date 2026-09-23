@@ -190,3 +190,15 @@ The `milestones/m4-route-probe.json` checkpoint was captured at 04:32:52 UTC on 
 | gpt-6-sol | high | 2,080,507 | 2,033,280 | 47,227 | 6,292 | 3,550 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Bounded fixed-route shooting checkpoint
+
+The `milestones/m4-shooting.json` checkpoint was captured at 05:33:55 UTC on 23 September 2026, against `milestones/m4-shooting-start.json` from 05:18:33. This interval includes the prewritten shooting contract, implementation, numerical review, local MSYS2 and MSVC checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 4,752,126 | 4,680,192 | 71,934 | 13,973 | 6,270 |
+| gpt-6-sol | medium | 5,087,953 | 5,038,464 | 49,489 | 11,726 | 3,834 |
+| gpt-6-sol | high | 457,366 | 447,360 | 10,006 | 2,002 | 1,471 |
+
+Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.

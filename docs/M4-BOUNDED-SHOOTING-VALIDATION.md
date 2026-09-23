@@ -1,0 +1,11 @@
+# M4 bounded fixed-route shooting validation
+
+The observable cases in `M4-BOUNDED-SHOOTING-CONTRACT.md` were specified before implementation on 23 September 2026. The shooting tests first failed on missing `shoot_fixed_route` symbols. The implementation keeps the source, route dates, body roles, initial state and four targets fixed while adjusting only the four inertial SI impulse vectors. It uses signed probe residuals, bounded finite differences and line searches, with explicit non-success statuses or errors for budget, geometry, singularity, unsafe trial and strict rejection.
+
+The manufactured synthetic seed is accepted by the existing strict evaluator. A nearby four-burn perturbation converges in 11 coarse probes and one shooting iteration, reduces Mars and home position residuals, and then passes independent tighter repropagation. Repeated runs are deterministic. Missing in-window Venus and an artificially tight strict disagreement budget remain non-success. A one-probe budget stops without acceptance; nonfinite limits, an over-limit seed and moved targets are rejected.
+
+The runtime-shaped test prepares the context from exact JSON bytes and SHA-256, then checks that strict acceptance retains the source hash. A stale hash or changed byte string is rejected. A Venus atmosphere present in parsed runtime bytes makes the trial unsafe even when the caller claims zero atmosphere. These tests exercise source authority without claiming an installed KSP comparison.
+
+Focused route-evaluator CTest passed 1/1 on MSYS2 UCRT and 1/1 on MSVC Debug. Full local MSYS2 build, including the worker and desktop targets, succeeded; CTest passed 14/14. Sol High read-only review found no P1/P2 numerical or import-contract issue. [GitHub Actions run 35822614595](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35822614595) passed all six Ubuntu 24.04 and Windows 2022 jobs for source commit `9b00c63`.
+
+This is local recovery around a fixed, manufactured route with an existing screened seed. It neither searches dates and diverse routes nor proves global optimality or the requested real JNSQ route. The strict result is only `independent_nbody_fixed_impulse_checkpointed_only`; Mars-stay continuous clearance and installed KSP/Principia agreement remain unverified. The worker and desktop UI do not yet expose this shooting API.
