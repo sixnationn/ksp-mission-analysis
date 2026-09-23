@@ -202,3 +202,15 @@ The `milestones/m4-shooting.json` checkpoint was captured at 05:33:55 UTC on 23 
 | gpt-6-sol | high | 457,366 | 447,360 | 10,006 | 2,002 | 1,471 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Headless bounded-shooting worker checkpoint
+
+The `milestones/m4-worker-shooting.json` checkpoint was captured at 06:37:41 UTC on 23 September 2026, against `milestones/m4-worker-shooting-start.json` from 06:19:04. This interval includes the prewritten worker contract, callback and protocol implementation, numerical/import review and fixes, local MSYS2 and MSVC checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 8,473,006 | 8,409,088 | 63,918 | 13,307 | 5,419 |
+| gpt-6-sol | medium | 4,530,433 | 4,472,704 | 57,729 | 15,523 | 3,186 |
+| gpt-6-sol | high | 2,945,673 | 2,912,000 | 33,673 | 5,823 | 3,185 |
+
+Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
