@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 285" role="img" aria-labelledby="growth-title growth-desc">
+<title id="growth-title">Cumulative fresh input and output after the first benchmark baseline</title>
+<desc id="growth-desc">The checkpoint record grows to 5.54M fresh input and 1.45M output tokens after the first baseline. Planning tokens before that baseline are included in the model totals above.</desc>
+<rect width="760" height="285" fill="#050505"/>
+<line x1="62.00" y1="222.00" x2="688.00" y2="222.00" stroke="#666" stroke-width="1" stroke-opacity="0.55"/>
+<text x="52.00" y="226.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">0</text>
+<line x1="62.00" y1="174.25" x2="688.00" y2="174.25" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="178.25" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">1.50M</text>
+<line x1="62.00" y1="126.50" x2="688.00" y2="126.50" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="130.50" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">3.00M</text>
+<line x1="62.00" y1="78.75" x2="688.00" y2="78.75" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="82.75" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">4.50M</text>
+<line x1="62.00" y1="31.00" x2="688.00" y2="31.00" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="35.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">6.00M</text>
+<line x1="62.00" y1="222.00" x2="62.00" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="62.00" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">22 Sep 19:06</text>
+<line x1="270.67" y1="222.00" x2="270.67" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="270.67" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 00:01</text>
+<line x1="479.33" y1="222.00" x2="479.33" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="479.33" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 04:55</text>
+<line x1="688.00" y1="222.00" x2="688.00" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="688.00" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 09:49</text>
+<polyline points="62.00,222.00 75.75,215.14 89.85,207.43 128.06,195.43 160.44,178.95 184.55,165.64 199.36,159.27 208.48,156.10 225.44,148.54 245.84,139.44 269.38,118.56 275.83,114.57 294.92,104.95 333.48,101.06 350.87,93.42 376.32,86.37 419.00,82.10 463.36,77.71 506.65,72.67 551.85,67.63 599.73,60.43 638.73,55.14 654.11,50.99 683.67,46.11 688.00,45.73" fill="none" stroke="#f2c679" stroke-width="2.5" stroke-linejoin="round"/>
+<polyline points="62.00,222.00 75.75,220.05 89.85,218.16 128.06,213.63 160.44,208.37 184.55,204.63 199.36,202.22 208.48,200.99 225.44,198.61 245.84,195.31 269.38,192.54 275.83,191.53 294.92,189.90 333.48,188.96 350.87,186.78 376.32,185.52 419.00,184.66 463.36,183.60 506.65,182.63 551.85,181.47 599.73,179.73 638.73,178.56 654.11,177.37 683.67,176.12 688.00,175.95" fill="none" stroke="#b7b5de" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="688.00" cy="45.73" r="4" fill="#f2c679"/>
+<circle cx="688.00" cy="175.95" r="4" fill="#b7b5de"/>
+<text x="700.00" y="49.73" fill="#f2c679" font-size="12" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">5.54M</text>
+<text x="700.00" y="179.95" fill="#b7b5de" font-size="12" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">1.45M</text>
+<text x="375.00" y="277.00" fill="#b8b8b8" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Checkpoint time · UTC</text>
+</svg>

@@ -1,0 +1,219 @@
+{
+  "source": "benchmarks/token-usage.json",
+  "captured_at_utc": "2026-09-23T09:49:44.2565807Z",
+  "model_totals": [
+    {
+      "model": "gpt-6-sol",
+      "effort": "xhigh",
+      "input_tokens": 296442590,
+      "cached_input_tokens": 293322624,
+      "fresh_input_tokens": 3119966,
+      "output_tokens": 813972,
+      "reasoning_output_tokens": 349277
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "input_tokens": 138903882,
+      "cached_input_tokens": 137315328,
+      "fresh_input_tokens": 1588554,
+      "output_tokens": 522167,
+      "reasoning_output_tokens": 137317
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "high",
+      "input_tokens": 39560011,
+      "cached_input_tokens": 38592384,
+      "fresh_input_tokens": 967627,
+      "output_tokens": 116891,
+      "reasoning_output_tokens": 58085
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "input_tokens": 2906603,
+      "cached_input_tokens": 2700032,
+      "fresh_input_tokens": 206571,
+      "output_tokens": 15499,
+      "reasoning_output_tokens": 852
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "input_tokens": 380847,
+      "cached_input_tokens": 326528,
+      "fresh_input_tokens": 54319,
+      "output_tokens": 2325,
+      "reasoning_output_tokens": 175
+    }
+  ],
+  "overall": {
+    "input_tokens": 478193933,
+    "cached_input_tokens": 472256896,
+    "output_tokens": 1470854,
+    "reasoning_output_tokens": 545706,
+    "fresh_input_tokens": 5937037
+  },
+  "first_baseline_at_utc": "2026-09-22T19:06:44.2525231Z",
+  "timeline": [
+    {
+      "label": "First baseline",
+      "captured_at_utc": "2026-09-22T19:06:44.2525231Z",
+      "fresh_input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "label": "m0",
+      "captured_at_utc": "2026-09-22T19:26:08.2876646Z",
+      "fresh_input_tokens": 215390,
+      "output_tokens": 61122
+    },
+    {
+      "label": "m1",
+      "captured_at_utc": "2026-09-22T19:46:01.0114026Z",
+      "fresh_input_tokens": 457837,
+      "output_tokens": 120686
+    },
+    {
+      "label": "m2-kernel",
+      "captured_at_utc": "2026-09-22T20:39:55.1549877Z",
+      "fresh_input_tokens": 834744,
+      "output_tokens": 262877
+    },
+    {
+      "label": "m4-screen",
+      "captured_at_utc": "2026-09-22T21:25:35.3996290Z",
+      "fresh_input_tokens": 1352449,
+      "output_tokens": 428078
+    },
+    {
+      "label": "m5-import",
+      "captured_at_utc": "2026-09-22T21:59:35.7196092Z",
+      "fresh_input_tokens": 1770330,
+      "output_tokens": 545532
+    },
+    {
+      "label": "m6-route",
+      "captured_at_utc": "2026-09-22T22:20:29.5648432Z",
+      "fresh_input_tokens": 1970602,
+      "output_tokens": 621465
+    },
+    {
+      "label": "m4-runtime-worker",
+      "captured_at_utc": "2026-09-22T22:33:21.4996981Z",
+      "fresh_input_tokens": 2070102,
+      "output_tokens": 659969
+    },
+    {
+      "label": "m6-bounded-worker-client",
+      "captured_at_utc": "2026-09-22T22:57:16.2225264Z",
+      "fresh_input_tokens": 2307544,
+      "output_tokens": 734658
+    },
+    {
+      "label": "m5-runtime-workflow",
+      "captured_at_utc": "2026-09-22T23:26:03.1794560Z",
+      "fresh_input_tokens": 2593408,
+      "output_tokens": 838563
+    },
+    {
+      "label": "m4-fixed-impulse",
+      "captured_at_utc": "2026-09-22T23:59:15.1012569Z",
+      "fresh_input_tokens": 3249532,
+      "output_tokens": 925541
+    },
+    {
+      "label": "m4-mars-radius",
+      "captured_at_utc": "2026-09-23T00:08:21.3712202Z",
+      "fresh_input_tokens": 3374803,
+      "output_tokens": 957220
+    },
+    {
+      "label": "m4-evaluator-worker",
+      "captured_at_utc": "2026-09-23T00:35:16.5912093Z",
+      "fresh_input_tokens": 3677103,
+      "output_tokens": 1008227
+    },
+    {
+      "label": "m5-evaluator-client",
+      "captured_at_utc": "2026-09-23T01:29:40.0985073Z",
+      "fresh_input_tokens": 3799188,
+      "output_tokens": 1037843
+    },
+    {
+      "label": "m5-evaluation-report",
+      "captured_at_utc": "2026-09-23T01:54:12.2082541Z",
+      "fresh_input_tokens": 4039128,
+      "output_tokens": 1106368
+    },
+    {
+      "label": "m2-persistent-cache",
+      "captured_at_utc": "2026-09-23T02:30:06.1185533Z",
+      "fresh_input_tokens": 4260527,
+      "output_tokens": 1145919
+    },
+    {
+      "label": "m2-worker-cache",
+      "captured_at_utc": "2026-09-23T03:30:18.0796543Z",
+      "fresh_input_tokens": 4394846,
+      "output_tokens": 1173012
+    },
+    {
+      "label": "m4-route-probe",
+      "captured_at_utc": "2026-09-23T04:32:52.3944949Z",
+      "fresh_input_tokens": 4532817,
+      "output_tokens": 1206219
+    },
+    {
+      "label": "m4-shooting",
+      "captured_at_utc": "2026-09-23T05:33:55.8185568Z",
+      "fresh_input_tokens": 4690903,
+      "output_tokens": 1236875
+    },
+    {
+      "label": "m4-worker-shooting",
+      "captured_at_utc": "2026-09-23T06:37:41.5386958Z",
+      "fresh_input_tokens": 4849174,
+      "output_tokens": 1273041
+    },
+    {
+      "label": "m5-shooting-client-report",
+      "captured_at_utc": "2026-09-23T07:45:13.8634540Z",
+      "fresh_input_tokens": 5075454,
+      "output_tokens": 1327906
+    },
+    {
+      "label": "m5-gtk-shooting-workflow",
+      "captured_at_utc": "2026-09-23T08:40:14.1636591Z",
+      "fresh_input_tokens": 5241707,
+      "output_tokens": 1364596
+    },
+    {
+      "label": "m5-report-reopen",
+      "captured_at_utc": "2026-09-23T09:01:56.1803972Z",
+      "fresh_input_tokens": 5371975,
+      "output_tokens": 1401974
+    },
+    {
+      "label": "m5-tester-handoff",
+      "captured_at_utc": "2026-09-23T09:43:37.7596599Z",
+      "fresh_input_tokens": 5525469,
+      "output_tokens": 1441379
+    },
+    {
+      "label": "Current",
+      "captured_at_utc": "2026-09-23T09:49:44.2565807Z",
+      "fresh_input_tokens": 5537248,
+      "output_tokens": 1446640
+    }
+  ],
+  "account_usage_snapshot": {
+    "source": "Codex account get_usage_limits",
+    "captured_at_utc": "2026-09-23T09:50:05Z",
+    "window_duration_minutes": 10080,
+    "used_percent": 74,
+    "remaining_percent": 26,
+    "resets_at_utc": "2026-09-26T16:18:06Z"
+  }
+}

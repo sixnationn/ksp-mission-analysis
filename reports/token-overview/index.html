@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KSP mission analysis · recorded token usage</title>
+  <style>
+    :root { color-scheme: dark; --bg: #000; --text: #f4f4f4; --secondary: #b9b9b9; --quiet: #888; --rule: #333; --fresh: #f2c679; --output: #b7b5de; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.48 Arial, Helvetica, sans-serif; }
+    a { color: inherit; }
+    a:hover { color: #fff; }
+    .site-header { height: 59px; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid #242424; font-size: 13px; }
+    .site-header .brand { font-weight: 700; letter-spacing: -.02em; }
+    .site-header .edition { color: #aaa; font-size: 12px; }
+    .article { width: min(790px, calc(100% - 42px)); margin: 38px auto 80px; position: relative; }
+    .rail { position: absolute; width: 204px; right: calc(100% + 85px); top: 188px; color: #999; font-size: 12px; line-height: 1.7; }
+    .rail .label { color: #eee; font-size: 12px; font-weight: 600; margin-bottom: 11px; }
+    .rail a { display: block; color: #999; text-decoration: none; margin: 5px 0; }
+    .rail a:hover { color: #fff; }
+    .rail .account { border-top: 1px solid var(--rule); margin-top: 28px; padding-top: 19px; }
+    .rail .account strong { display: block; color: #eee; font-size: 24px; font-weight: 500; line-height: 1.15; margin: 5px 0 11px; }
+    .usage-track { height: 3px; background: #363636; margin: 0 0 11px; }
+    .usage-fill { height: 3px; background: var(--fresh); width: 74%; }
+    .rail .account small { display: block; color: #989898; font-size: 11px; line-height: 1.5; }
+    .kicker { font-size: 12px; color: #a5a5a5; margin: 0 0 12px; }
+    h1 { font-size: 54px; letter-spacing: -.045em; line-height: 1.08; font-weight: 500; margin: 0 0 17px; }
+    .lead { font-size: 18px; line-height: 1.48; color: #d4d4d4; margin: 0 0 29px; max-width: 770px; }
+    .chart-card { border: 1px solid #3c3c3c; border-radius: 13px; background: #050505; padding: 20px 21px 17px; }
+    .chart-header { display: flex; justify-content: space-between; gap: 18px; align-items: start; }
+    .chart-header h2 { font-size: 18px; font-weight: 600; margin: 0; }
+    .legend { display: flex; gap: 18px; align-items: center; color: #c6c6c6; font-size: 12px; white-space: nowrap; }
+    .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .swatch.cached { background: #dedede; }
+    .swatch.fresh { background: var(--fresh); }
+    .swatch.output { background: var(--output); }
+    svg { width: 100%; height: auto; display: block; margin-top: 13px; }
+    .chart-caption { color: #b5b5b5; font-size: 12px; line-height: 1.45; margin: 4px 0 0; border-top: 1px solid #292929; padding-top: 12px; }
+    .result { margin-top: 26px; }
+    .result h2, .secondary h2 { font-size: 21px; letter-spacing: -.02em; font-weight: 500; margin: 0 0 7px; }
+    .result p, .secondary p { margin: 0 0 13px; color: #c8c8c8; font-size: 14px; line-height: 1.48; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 10px 7px; border-bottom: 1px solid #303030; text-align: right; font-weight: 400; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; padding-left: 0; }
+    thead th { color: #b8b8b8; border-top: 1px solid #444; font-weight: 600; }
+    tbody th, tbody td { color: #e9e9e9; }
+    .result-note { color: #929292 !important; font-size: 12px !important; margin-top: 10px !important; }
+    .account-inline { display: none; }
+    .secondary { margin-top: 44px; }
+    .secondary .chart-card { margin-top: 17px; }
+    .bottom-note { font-size: 12px; color: #989898; border-top: 1px solid var(--rule); padding-top: 17px; margin-top: 38px; }
+    .bottom-note a { color: #bbb; }
+    @media (max-width: 1220px) {
+      .rail { display: none; }
+      .article { margin-top: 40px; }
+      .account-inline { display: block; border-top: 1px solid #444; padding-top: 18px; margin-top: 27px; }
+      .account-inline strong { font-weight: 500; }
+      .account-inline .usage-track { margin-top: 10px; }
+      .account-inline small { color: #aaa; }
+    }
+    @media (max-width: 700px) {
+      .site-header { padding: 0 20px; }
+      .site-header .edition { display: none; }
+      h1 { font-size: 40px; }
+      .lead { font-size: 16px; }
+      .chart-card { overflow-x: auto; padding: 15px; }
+      .chart-header { display: block; }
+      .legend { margin-top: 11px; }
+      svg { min-width: 620px; }
+      .result { overflow-x: auto; }
+      table { min-width: 770px; }
+    }
+    @media print { body { background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <header class="site-header"><span class="brand">KSP mission analysis</span><span class="edition">Engineering note · 23 September 2026</span></header>
+  <main class="article">
+    <aside class="rail" aria-label="Page sections and account usage">
+      <div class="label">In this report</div>
+      <a href="#overview">Overview</a><a href="#token-record">Model record</a><a href="#totals">Totals</a><a href="#checkpoints">Checkpoints</a>
+      <div class="account"><div class="label">Codex account usage</div><strong>74% used</strong>
+        <div class="usage-track" role="img" aria-label="74 percent of the account's seven-day Codex window used"><div class="usage-fill"></div></div>
+        <small>26% remaining · seven-day window<br>Resets 26 Sep 2026 16:18 UTC<br>Captured 23 Sep 2026 09:50 UTC</small>
+      </div>
+    </aside>
+    <section id="overview"><p class="kicker">PROJECT / TOKEN RECORD</p><h1>Recorded token usage</h1>
+      <p class="lead">From planning through the first tester handoff, 478,193,933 input tokens were recorded. 98.8% were cached reads. Account capacity is shown separately.</p>
+    </section>
+    <section id="token-record" aria-label="Recorded project tokens"><div class="chart-card">
+      <div class="chart-header"><h2>Input by model and effort</h2><div class="legend"><span><i class="swatch cached"></i>Cached input</span><span><i class="swatch fresh"></i>Fresh input</span></div></div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 346" role="img" aria-labelledby="input-title input-desc">
+<title id="input-title">Recorded input by model and reasoning effort</title>
+<desc id="input-desc">Five model and effort groups. Gray denotes cached input, amber denotes fresh input. Sol xhigh has the largest total.</desc>
+<rect width="760" height="346" fill="#050505"/>
+<line x1="162.00" y1="27.00" x2="162.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.7"/>
+<text x="162.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">0M</text>
+<line x1="287.50" y1="27.00" x2="287.50" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="287.50" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">75M</text>
+<line x1="413.00" y1="27.00" x2="413.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="413.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">150M</text>
+<line x1="538.50" y1="27.00" x2="538.50" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="538.50" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">225M</text>
+<line x1="664.00" y1="27.00" x2="664.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="664.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">300M</text>
+<text x="0.00" y="69.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · xhigh</text>
+<line x1="162.00" y1="64.00" x2="652.83" y2="64.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="652.83" y1="64.00" x2="658.05" y2="64.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="658.05" cy="64" r="4" fill="#f2c679"/>
+<text x="744.00" y="69.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">296.44M</text>
+<text x="0.00" y="124.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · medium</text>
+<line x1="162.00" y1="119.00" x2="391.77" y2="119.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="391.77" y1="119.00" x2="394.43" y2="119.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="394.43" cy="119" r="4" fill="#f2c679"/>
+<text x="744.00" y="124.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">138.90M</text>
+<text x="0.00" y="179.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · high</text>
+<line x1="162.00" y1="174.00" x2="226.58" y2="174.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="226.58" y1="174.00" x2="228.20" y2="174.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="228.20" cy="174" r="4" fill="#f2c679"/>
+<text x="744.00" y="179.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">39.56M</text>
+<text x="0.00" y="234.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">astra · medium</text>
+<line x1="162.00" y1="229.00" x2="166.52" y2="229.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="166.52" y1="229.00" x2="166.86" y2="229.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="166.86" cy="229" r="4" fill="#f2c679"/>
+<text x="744.00" y="234.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">2.91M</text>
+<text x="0.00" y="289.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">astra · high</text>
+<line x1="162.00" y1="284.00" x2="162.55" y2="284.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="162.55" y1="284.00" x2="162.64" y2="284.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="162.64" cy="284" r="4" fill="#f2c679"/>
+<text x="744.00" y="289.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">380.8k</text>
+<line x1="162.00" y1="299.00" x2="664.00" y2="299.00" stroke="#999" stroke-width="1" stroke-opacity="0.55"/>
+<text x="413.00" y="341.00" fill="#b8b8b8" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Total recorded input · millions of tokens</text>
+</svg>
+      <p class="chart-caption">Line length is total recorded input. The amber endpoint is fresh input; it is small against repeated cached reads. Counts are from registered project task sessions.</p>
+    </div></section>
+    <section id="totals" class="result"><h2>Across the recorded sessions</h2>
+      <p>472,256,896 cached input and 5,937,037 fresh input tokens make up the input total. Output was 1,470,854, including 545,706 reasoning tokens.</p>
+      <table><thead><tr><th scope="col">Model · effort</th><th scope="col">Input</th><th scope="col">Cached</th><th scope="col">Fresh</th><th scope="col">Output</th><th scope="col">Reasoning*</th></tr></thead><tbody><tr><th scope="row">gpt-6-sol · xhigh</th><td>296,442,590</td><td>293,322,624</td><td>3,119,966</td><td>813,972</td><td>349,277</td></tr>
+<tr><th scope="row">gpt-6-sol · medium</th><td>138,903,882</td><td>137,315,328</td><td>1,588,554</td><td>522,167</td><td>137,317</td></tr>
+<tr><th scope="row">gpt-6-sol · high</th><td>39,560,011</td><td>38,592,384</td><td>967,627</td><td>116,891</td><td>58,085</td></tr>
+<tr><th scope="row">gpt-6-astra · medium</th><td>2,906,603</td><td>2,700,032</td><td>206,571</td><td>15,499</td><td>852</td></tr>
+<tr><th scope="row">gpt-6-astra · high</th><td>380,847</td><td>326,528</td><td>54,319</td><td>2,325</td><td>175</td></tr></tbody></table>
+      <p class="result-note">*Reasoning is included in output; cached input is included in input. Recorded tokens are not billing or a measure of account capacity.</p>
+    </section>
+    <section class="account-inline" aria-label="Codex account usage"><strong>Codex account usage: 74% of the seven-day window used</strong>
+      <div class="usage-track"><div class="usage-fill"></div></div><small>26% remaining. Captured 23 Sep 2026 09:50 UTC; resets 26 Sep 2026 16:18 UTC. Account-wide, separate from this project's token record.</small>
+    </section>
+    <section id="checkpoints" class="secondary"><h2>After the first benchmark baseline</h2><p>Fresh input and output rose as the project moved through recorded milestones. Planning tokens before the baseline are included in the totals above.</p>
+      <div class="chart-card"><div class="chart-header"><h2>Cumulative checkpoint growth</h2><div class="legend"><span><i class="swatch fresh"></i>Fresh input</span><span><i class="swatch output"></i>Output</span></div></div>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 285" role="img" aria-labelledby="growth-title growth-desc">
+<title id="growth-title">Cumulative fresh input and output after the first benchmark baseline</title>
+<desc id="growth-desc">The checkpoint record grows to 5.54M fresh input and 1.45M output tokens after the first baseline. Planning tokens before that baseline are included in the model totals above.</desc>
+<rect width="760" height="285" fill="#050505"/>
+<line x1="62.00" y1="222.00" x2="688.00" y2="222.00" stroke="#666" stroke-width="1" stroke-opacity="0.55"/>
+<text x="52.00" y="226.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">0</text>
+<line x1="62.00" y1="174.25" x2="688.00" y2="174.25" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="178.25" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">1.50M</text>
+<line x1="62.00" y1="126.50" x2="688.00" y2="126.50" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="130.50" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">3.00M</text>
+<line x1="62.00" y1="78.75" x2="688.00" y2="78.75" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="82.75" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">4.50M</text>
+<line x1="62.00" y1="31.00" x2="688.00" y2="31.00" stroke="#666" stroke-width="1" stroke-opacity="0.2"/>
+<text x="52.00" y="35.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="end" font-family="Arial, Helvetica, sans-serif">6.00M</text>
+<line x1="62.00" y1="222.00" x2="62.00" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="62.00" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">22 Sep 19:06</text>
+<line x1="270.67" y1="222.00" x2="270.67" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="270.67" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 00:01</text>
+<line x1="479.33" y1="222.00" x2="479.33" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="479.33" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 04:55</text>
+<line x1="688.00" y1="222.00" x2="688.00" y2="227.00" stroke="#888" stroke-width="1" stroke-opacity="1"/>
+<text x="688.00" y="245.00" fill="#aaa" font-size="11" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">23 Sep 09:49</text>
+<polyline points="62.00,222.00 75.75,215.14 89.85,207.43 128.06,195.43 160.44,178.95 184.55,165.64 199.36,159.27 208.48,156.10 225.44,148.54 245.84,139.44 269.38,118.56 275.83,114.57 294.92,104.95 333.48,101.06 350.87,93.42 376.32,86.37 419.00,82.10 463.36,77.71 506.65,72.67 551.85,67.63 599.73,60.43 638.73,55.14 654.11,50.99 683.67,46.11 688.00,45.73" fill="none" stroke="#f2c679" stroke-width="2.5" stroke-linejoin="round"/>
+<polyline points="62.00,222.00 75.75,220.05 89.85,218.16 128.06,213.63 160.44,208.37 184.55,204.63 199.36,202.22 208.48,200.99 225.44,198.61 245.84,195.31 269.38,192.54 275.83,191.53 294.92,189.90 333.48,188.96 350.87,186.78 376.32,185.52 419.00,184.66 463.36,183.60 506.65,182.63 551.85,181.47 599.73,179.73 638.73,178.56 654.11,177.37 683.67,176.12 688.00,175.95" fill="none" stroke="#b7b5de" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="688.00" cy="45.73" r="4" fill="#f2c679"/>
+<circle cx="688.00" cy="175.95" r="4" fill="#b7b5de"/>
+<text x="700.00" y="49.73" fill="#f2c679" font-size="12" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">5.54M</text>
+<text x="700.00" y="179.95" fill="#b7b5de" font-size="12" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">1.45M</text>
+<text x="375.00" y="277.00" fill="#b8b8b8" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Checkpoint time · UTC</text>
+</svg>
+        <p class="chart-caption">Milestone snapshots, ordered by capture time. These are recording intervals across different tasks, not controlled model comparisons.</p>
+      </div>
+    </section>
+    <footer class="bottom-note">Project record captured 23 Sep 2026 09:49 UTC. Account usage captured 23 Sep 2026 09:50 UTC. The latter includes work outside this project. <a href="../../benchmarks/README.md">Benchmark method</a>.</footer>
+  </main>
+</body>
+</html>

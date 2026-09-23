@@ -49,6 +49,7 @@ On Ubuntu 24.04, install the approved GTK build packages listed in [dependencies
 - [Snapshot contract and failure cases](docs/SNAPSHOT-CONTRACT.md)
 - [Importer source](src/KspMission.Import/) and [focused checks](tests/KspMission.Import.Tests/)
 - [M1 showcase and graphs](reports/m1-showcase/index.html)
+- [Current token and account-usage overview](reports/token-overview/index.html)
 - [M2 ephemeris contract and validation](docs/M2-VALIDATION.md)
 - [M3 spacecraft checks](docs/M3-VALIDATION.md)
 - [M4 screening and refinement limits](docs/M4-SEARCH-CONTRACT.md)

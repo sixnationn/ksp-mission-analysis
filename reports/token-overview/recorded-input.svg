@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 346" role="img" aria-labelledby="input-title input-desc">
+<title id="input-title">Recorded input by model and reasoning effort</title>
+<desc id="input-desc">Five model and effort groups. Gray denotes cached input, amber denotes fresh input. Sol xhigh has the largest total.</desc>
+<rect width="760" height="346" fill="#050505"/>
+<line x1="162.00" y1="27.00" x2="162.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.7"/>
+<text x="162.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">0M</text>
+<line x1="287.50" y1="27.00" x2="287.50" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="287.50" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">75M</text>
+<line x1="413.00" y1="27.00" x2="413.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="413.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">150M</text>
+<line x1="538.50" y1="27.00" x2="538.50" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="538.50" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">225M</text>
+<line x1="664.00" y1="27.00" x2="664.00" y2="299.00" stroke="#606060" stroke-width="1" stroke-opacity="0.24"/>
+<text x="664.00" y="319.00" fill="#a7a7a7" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">300M</text>
+<text x="0.00" y="69.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · xhigh</text>
+<line x1="162.00" y1="64.00" x2="652.83" y2="64.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="652.83" y1="64.00" x2="658.05" y2="64.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="658.05" cy="64" r="4" fill="#f2c679"/>
+<text x="744.00" y="69.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">296.44M</text>
+<text x="0.00" y="124.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · medium</text>
+<line x1="162.00" y1="119.00" x2="391.77" y2="119.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="391.77" y1="119.00" x2="394.43" y2="119.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="394.43" cy="119" r="4" fill="#f2c679"/>
+<text x="744.00" y="124.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">138.90M</text>
+<text x="0.00" y="179.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">sol · high</text>
+<line x1="162.00" y1="174.00" x2="226.58" y2="174.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="226.58" y1="174.00" x2="228.20" y2="174.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="228.20" cy="174" r="4" fill="#f2c679"/>
+<text x="744.00" y="179.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">39.56M</text>
+<text x="0.00" y="234.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">astra · medium</text>
+<line x1="162.00" y1="229.00" x2="166.52" y2="229.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="166.52" y1="229.00" x2="166.86" y2="229.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="166.86" cy="229" r="4" fill="#f2c679"/>
+<text x="744.00" y="234.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">2.91M</text>
+<text x="0.00" y="289.00" fill="#eee" font-size="15" font-weight="600" text-anchor="start" font-family="Arial, Helvetica, sans-serif">astra · high</text>
+<line x1="162.00" y1="284.00" x2="162.55" y2="284.00" stroke="#dedede" stroke-width="4" stroke-opacity="1"/>
+<line x1="162.55" y1="284.00" x2="162.64" y2="284.00" stroke="#f2c679" stroke-width="5" stroke-opacity="1"/>
+<circle cx="162.64" cy="284" r="4" fill="#f2c679"/>
+<text x="744.00" y="289.00" fill="#f1f1f1" font-size="14" font-weight="600" text-anchor="end" font-family="Arial, Helvetica, sans-serif">380.8k</text>
+<line x1="162.00" y1="299.00" x2="664.00" y2="299.00" stroke="#999" stroke-width="1" stroke-opacity="0.55"/>
+<text x="413.00" y="341.00" fill="#b8b8b8" font-size="12" font-weight="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Total recorded input · millions of tokens</text>
+</svg>
