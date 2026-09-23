@@ -6,4 +6,4 @@ Before implementation, a missing-source request failed its pre-`started` rejecti
 
 The manufactured positive runtime-shaped trial returned four actual burns totaling **392.06803433560145 m/s**, a coarse Venus safety margin of **988963.5782429412 m**, explicit central/home/Mars/Venus body IDs and a **4,895-byte** terminal event. This is synthetic numerical and protocol evidence, not an installed KSP result. The numerical evaluation itself is one non-interruptible stage; the worker client must terminate it on a cancellation timeout. This command is headless and is not yet exposed in the GTK study workflow. Continuous Mars parking, route optimization, a real JNSQ Reborn/Principia capture, rendered UI review and distributable packaging remain open.
 
-Ubuntu and Windows CI for the source-bearing commit is pending.
+All six Ubuntu and Windows jobs passed for source-bearing commit `a33184b` in [CI run 35802342014](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35802342014).
