@@ -311,7 +311,7 @@ RouteProbeContext prepare_route_probe_runtime(const std::string& json_bytes,cons
     catch(const RuntimeReaderError& error){throw RouteEvaluationError(std::string("runtime source: ")+error.what());}
     auto trusted=baseline;trusted.atmosphere_boundaries=loaded.atmosphere_boundaries;
     auto ephemeris=prepare_probe_ephemeris(loaded.snapshot,trusted);
-    return RouteProbeContext(std::move(loaded.snapshot),std::move(trusted),std::move(ephemeris));
+    return RouteProbeContext(std::move(loaded.snapshot),std::move(trusted),std::move(ephemeris),json_bytes,expected_sha256);
 }
 RouteProbeResult probe_route_trial(const RouteProbeContext& context,const RouteProbeTrial& trial){
     const auto& s=context.snapshot_;const auto& q=context.baseline_;const auto& ephemeris=context.ephemeris_;
@@ -368,6 +368,127 @@ RouteProbeResult probe_route_trial(const RouteProbeContext& context,const RouteP
         if(std::abs(event.ut_s-dates.venus)<=q.venus_window_halfwidth_s&&
            (!out.selected_venus||event.distance_m<out.selected_venus->distance_m))out.selected_venus=event;
     }
+    return out;
+}
+namespace {
+double axis(Vec3 v,int i){return i==0?v.x:(i==1?v.y:v.z);}
+void add_axis(Vec3& v,int i,double delta){if(i==0)v.x+=delta;else if(i==1)v.y+=delta;else v.z+=delta;}
+bool same_vec(Vec3 a,Vec3 b){return a.x==b.x&&a.y==b.y&&a.z==b.z;}
+bool same_state(State a,State b){return same_vec(a.position_m,b.position_m)&&same_vec(a.velocity_mps,b.velocity_mps);}
+Vec3 block_residual(const RouteProbeResult& result,int block){
+    const auto& checkpoint=result.checkpoints[block<2?1:3];
+    return (block==0||block==2)?checkpoint.signed_position_residual_m:checkpoint.signed_velocity_residual_mps;
+}
+std::optional<Vec3> solve_three(double matrix[3][3],Vec3 residual){
+    double a[3][4]{};double scale=0;
+    for(int row=0;row<3;++row){for(int col=0;col<3;++col){a[row][col]=matrix[row][col];scale=std::max(scale,std::abs(a[row][col]));}a[row][3]=-axis(residual,row);}
+    if(!finite(scale)||scale==0)return std::nullopt;
+    for(int col=0;col<3;++col){int pivot=col;
+        for(int row=col+1;row<3;++row)if(std::abs(a[row][col])>std::abs(a[pivot][col]))pivot=row;
+        if(!finite(a[pivot][col])||std::abs(a[pivot][col])<=1e-12*scale)return std::nullopt;
+        for(int k=col;k<4;++k)std::swap(a[col][k],a[pivot][k]);
+        const double divisor=a[col][col];for(int k=col;k<4;++k)a[col][k]/=divisor;
+        for(int row=0;row<3;++row)if(row!=col){const double factor=a[row][col];for(int k=col;k<4;++k)a[row][k]-=factor*a[col][k];}
+    }
+    Vec3 change{a[0][3],a[1][3],a[2][3]};if(!finite(change))return std::nullopt;return change;
+}
+}
+RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const RouteProbeTrial& seed,
+    const RouteShootingLimits& limits){
+    const auto& q=context.baseline_;const auto& s=context.snapshot_;
+    if(!finite(limits.finite_difference_impulse_mps)||limits.finite_difference_impulse_mps<=0||
+       !finite(limits.max_impulse_mps)||limits.max_impulse_mps<=0)
+        throw RouteEvaluationError("shooting limit invalid");
+    if(limits.max_iterations==0||limits.max_iterations>1000||limits.max_probe_evaluations==0||
+       limits.max_probe_evaluations>10000)throw RouteEvaluationError("shooting budget invalid");
+    if(!same_state(seed.launch_parking_state,q.launch_parking_state))
+        throw RouteEvaluationError("shooting fixed launch state differs from context");
+    for(std::size_t i=0;i<4;++i){
+        if(!same_state(seed.checkpoint_targets_relative[i],q.checkpoint_targets_relative[i]))
+            throw RouteEvaluationError("shooting fixed target differs from context");
+        if(!finite(seed.impulses_mps[i])||!finite(norm(seed.impulses_mps[i]))||
+           norm(seed.impulses_mps[i])>limits.max_impulse_mps)
+            throw RouteEvaluationError("shooting seed impulse exceeds bound");
+    }
+    const auto dates=validate(s,q);
+    RouteShootingResult out;RouteProbeTrial current_trial=seed;
+    auto evaluate=[&](const RouteProbeTrial& trial)->std::optional<RouteProbeResult>{
+        if(out.probe_evaluations>=limits.max_probe_evaluations)return std::nullopt;
+        ++out.probe_evaluations;return probe_route_trial(context,trial);
+    };
+    out.final_probe=*evaluate(current_trial);
+    auto coarse_reason=[&](const RouteProbeResult& probe)->std::string{
+        if(!probe.selected_venus)return "missing_venus";
+        if(!probe.minimum_observed_venus_boundary_margin_m||
+           *probe.minimum_observed_venus_boundary_margin_m<=0||
+           probe.selected_venus->distance_m>q.venus_max_encounter_radius_m)return "venus_boundary_or_radius";
+        const auto& mars=body(s,dates.mars_id);const double shell=mars.radius_m+q.mars_parking_altitude_m;
+        if(probe.mars_stay_radius.model_interval_lower_m<=mars.radius_m+atmosphere(q,dates.mars_id)||
+           probe.mars_stay_radius.model_interval_lower_m<shell-q.parking_radius_tolerance_m||
+           probe.mars_stay_radius.model_interval_upper_m>shell+q.parking_radius_tolerance_m)
+            return "mars_stay_failed";
+        for(const auto& checkpoint:probe.checkpoints)
+            if(norm(checkpoint.signed_position_residual_m)>q.fixed_position_tolerance_m||
+               norm(checkpoint.signed_velocity_residual_mps)>q.fixed_velocity_tolerance_mps||
+               std::abs(checkpoint.signed_parking_radius_residual_m)>q.parking_radius_tolerance_m||
+               std::abs(checkpoint.signed_radial_velocity_mps)>q.parking_radial_velocity_tolerance_mps||
+               std::abs(checkpoint.signed_tangential_speed_residual_mps)>q.parking_tangential_speed_tolerance_mps)
+                return "coarse_constraints_failed";
+        return {};
+    };
+    auto strict_gate=[&](){auto request=q;request.impulses_mps=current_trial.impulses_mps;
+        try{
+            if(context.runtime_bytes_.empty())out.strict_result=evaluate_fixed_route_synthetic_fixture(s,request);
+            else out.strict_result=evaluate_fixed_route_runtime(context.runtime_bytes_,context.runtime_hash_,request);
+            out.status="checkpointed_accepted";
+        }catch(const RouteEvaluationError&){out.status="strict_rejected";}
+    };
+    if(coarse_reason(out.final_probe).empty()){strict_gate();return out;}
+    for(std::size_t iteration=0;iteration<limits.max_iterations;++iteration){
+        bool changed=false;out.iterations=iteration+1;
+        for(int block=0;block<4;++block){
+            const Vec3 residual=block_residual(out.final_probe,block);
+            // Leave slack for the downstream Mars stay and parking checks, which can
+            // amplify small capture/departure velocity errors over long arcs.
+            const double tolerance=(block==0||block==2)?
+                std::min(q.fixed_position_tolerance_m,1.0):std::min(q.fixed_velocity_tolerance_mps,1e-6);
+            if(norm(residual)<=tolerance)continue;
+            Vec3 correction{};
+            if(block==0||block==2){
+                double jacobian[3][3]{};
+                for(int col=0;col<3;++col){auto difference=current_trial;
+                    double h=limits.finite_difference_impulse_mps;
+                    add_axis(difference.impulses_mps[block],col,h);
+                    if(norm(difference.impulses_mps[block])>limits.max_impulse_mps){h=-h;difference=current_trial;add_axis(difference.impulses_mps[block],col,h);}
+                    if(!finite(norm(difference.impulses_mps[block]))||norm(difference.impulses_mps[block])>limits.max_impulse_mps){out.status="impulse_bound";return out;}
+                    std::optional<RouteProbeResult> sample;
+                    try{sample=evaluate(difference);}catch(const RouteEvaluationError&){out.status="unsafe_difference";return out;}
+                    if(!sample){out.status="budget_exhausted";return out;}
+                    const auto derivative=(block_residual(*sample,block)-residual)*(1.0/h);
+                    for(int row=0;row<3;++row)jacobian[row][col]=axis(derivative,row);
+                }
+                const auto solved=solve_three(jacobian,residual);
+                if(!solved){out.status="singular_jacobian";return out;}correction=*solved;
+            }else correction=residual*(-1.0);
+            bool accepted=false;
+            for(int attempt=0;attempt<12;++attempt){const double alpha=std::ldexp(1.0,-attempt);
+                auto candidate=current_trial;candidate.impulses_mps[block]=candidate.impulses_mps[block]+correction*alpha;
+                if(!finite(candidate.impulses_mps[block])||!finite(norm(candidate.impulses_mps[block]))||
+                   norm(candidate.impulses_mps[block])>limits.max_impulse_mps)continue;
+                std::optional<RouteProbeResult> sample;
+                try{sample=evaluate(candidate);}catch(const RouteEvaluationError&){continue;}
+                if(!sample){out.status="budget_exhausted";return out;}
+                if(norm(block_residual(*sample,block))<norm(residual)){
+                    current_trial=std::move(candidate);out.final_probe=std::move(*sample);accepted=true;changed=true;break;
+                }
+            }
+            if(!accepted){out.status="line_search_failed";return out;}
+        }
+        const auto reason=coarse_reason(out.final_probe);
+        if(reason.empty()){strict_gate();return out;}
+        if(!changed){out.status=reason;return out;}
+    }
+    out.status=coarse_reason(out.final_probe);if(out.status.empty())out.status="budget_exhausted";
     return out;
 }
 }

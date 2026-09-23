@@ -91,6 +91,8 @@ struct RouteProbeResult {
     std::size_t accepted_steps=0,rejected_steps=0;
     double total_charged_delta_v_mps=0;
 };
+struct RouteShootingLimits;
+struct RouteShootingResult;
 class RouteProbeContext {
 public:
     RouteProbeContext(const RouteProbeContext&)=default;
@@ -101,14 +103,30 @@ private:
     Snapshot snapshot_;
     RouteEvaluationRequest baseline_;
     Ephemeris ephemeris_;
-    RouteProbeContext(Snapshot snapshot,RouteEvaluationRequest baseline,Ephemeris ephemeris)
-        :snapshot_(std::move(snapshot)),baseline_(std::move(baseline)),ephemeris_(std::move(ephemeris)){}
+    std::string runtime_bytes_,runtime_hash_;
+    RouteProbeContext(Snapshot snapshot,RouteEvaluationRequest baseline,Ephemeris ephemeris,
+        std::string runtime_bytes={},std::string runtime_hash={})
+        :snapshot_(std::move(snapshot)),baseline_(std::move(baseline)),ephemeris_(std::move(ephemeris)),
+         runtime_bytes_(std::move(runtime_bytes)),runtime_hash_(std::move(runtime_hash)){}
     friend RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot&,const RouteEvaluationRequest&);
     friend RouteProbeContext prepare_route_probe_runtime(const std::string&,const std::string&,const RouteEvaluationRequest&);
     friend RouteProbeResult probe_route_trial(const RouteProbeContext&,const RouteProbeTrial&);
+    friend RouteShootingResult shoot_fixed_route(const RouteProbeContext&,const RouteProbeTrial&,const RouteShootingLimits&);
 };
 RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot& snapshot,const RouteEvaluationRequest& baseline);
 RouteProbeContext prepare_route_probe_runtime(const std::string& runtime_json_bytes,const std::string& expected_sha256,
     const RouteEvaluationRequest& baseline);
 RouteProbeResult probe_route_trial(const RouteProbeContext& context,const RouteProbeTrial& trial);
+struct RouteShootingLimits {
+    double finite_difference_impulse_mps=0,max_impulse_mps=0;
+    std::size_t max_iterations=0,max_probe_evaluations=0;
+};
+struct RouteShootingResult {
+    std::string status="diagnostic_only";
+    RouteProbeResult final_probe;
+    std::optional<RouteEvaluationResult> strict_result;
+    std::size_t iterations=0,probe_evaluations=0;
+};
+RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const RouteProbeTrial& seed,
+    const RouteShootingLimits& limits);
 }

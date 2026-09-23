@@ -188,6 +188,62 @@ void probe_tests(const Snapshot& s,const RouteEvaluationRequest& q){
     auto unsafe=trial;unsafe.launch_parking_state.position_m=s.bodies[1].state->position_m;
     rejects([&]{probe_route_trial(context,unsafe);},"unsafe");
 }
+void shooting_tests(const Snapshot& s,const RouteEvaluationRequest& q){
+    const auto context=prepare_route_probe_synthetic_fixture(s,q);const auto seed=probe_trial(q);
+    RouteShootingLimits limits{0.01,1000.0,6,80};
+    const auto exact=shoot_fixed_route(context,seed,limits);
+    check(exact.status=="checkpointed_accepted"&&exact.strict_result&&
+        exact.strict_result->result_label=="independent_nbody_fixed_impulse_checkpointed_only"&&
+        exact.final_probe.snapshot_hash==s.snapshot_hash&&exact.probe_evaluations<=limits.max_probe_evaluations,
+        "exact fixed route seed requires strict acceptance");
+    auto nearby=seed;nearby.impulses_mps[0].x+=0.05;nearby.impulses_mps[2].x-=0.05;
+    nearby.impulses_mps[1].y+=0.001;nearby.impulses_mps[3].y-=0.001;
+    const auto initial=probe_route_trial(context,nearby);
+    const auto repaired=shoot_fixed_route(context,nearby,limits);
+    check(repaired.status=="checkpointed_accepted"&&repaired.strict_result&&
+        repaired.probe_evaluations<=limits.max_probe_evaluations&&repaired.iterations<=limits.max_iterations,
+        "nearby four-burn seed strictly repaired within budget");
+    check(norm(repaired.final_probe.checkpoints[1].signed_position_residual_m)<
+        norm(initial.checkpoints[1].signed_position_residual_m)&&
+        norm(repaired.final_probe.checkpoints[3].signed_position_residual_m)<
+        norm(initial.checkpoints[3].signed_position_residual_m),"signed Mars/home position residuals reduced");
+    check(repaired.final_probe.trial.launch_parking_state.position_m.x==seed.launch_parking_state.position_m.x&&
+        repaired.final_probe.trial.checkpoint_targets_relative[3].position_m.x==seed.checkpoint_targets_relative[3].position_m.x,
+        "shooting leaves launch and targets fixed");
+    const auto repeat=shoot_fixed_route(context,nearby,limits);
+    check(repeat.status==repaired.status&&repeat.probe_evaluations==repaired.probe_evaluations&&
+        repeat.final_probe.trial.impulses_mps[0].x==repaired.final_probe.trial.impulses_mps[0].x,
+        "shooting deterministic");
+    auto bad=limits;bad.max_probe_evaluations=0;rejects([&]{shoot_fixed_route(context,seed,bad);},"budget");
+    bad=limits;bad.finite_difference_impulse_mps=std::numeric_limits<double>::quiet_NaN();
+    rejects([&]{shoot_fixed_route(context,seed,bad);},"limit");
+    bad=limits;bad.max_impulse_mps=0.001;rejects([&]{shoot_fixed_route(context,seed,bad);},"bound");
+    auto moving_goal=seed;moving_goal.checkpoint_targets_relative[1].position_m.x+=1;
+    rejects([&]{shoot_fixed_route(context,moving_goal,limits);},"fixed target");
+    bad=limits;bad.max_probe_evaluations=1;
+    const auto exhausted=shoot_fixed_route(context,nearby,bad);
+    check(exhausted.status=="budget_exhausted"&&!exhausted.strict_result&&
+        exhausted.probe_evaluations==1,"bounded probe budget failure is not acceptance");
+    auto shifted=q;shifted.route.mars_venus.arrival_ut_s=departure+110000;
+    shifted.route.mars_venus.flight_time_s=110000;
+    shifted.route.venus_home.departure_ut_s=shifted.route.mars_venus.arrival_ut_s;
+    shifted.route.venus_home.flight_time_s=home_return-shifted.route.venus_home.departure_ut_s;
+    shifted.venus_window_halfwidth_s=1;
+    const auto missing_context=prepare_route_probe_synthetic_fixture(s,shifted);
+    const auto missing=shoot_fixed_route(missing_context,seed,limits);
+    check(missing.status=="missing_venus"&&!missing.strict_result&&
+        !missing.final_probe.selected_venus,"missing screened Venus root remains non-success");
+    auto impossible=q;impossible.venus_max_encounter_radius_m=900000;
+    const auto impossible_context=prepare_route_probe_synthetic_fixture(s,impossible);
+    const auto radius_failure=shoot_fixed_route(impossible_context,seed,limits);
+    check(radius_failure.status=="venus_boundary_or_radius"&&!radius_failure.strict_result,
+        "impossible Venus radius cap cannot be accepted");
+    auto tight=q;tight.disagreement_position_m=1e-12;
+    const auto tight_context=prepare_route_probe_synthetic_fixture(s,tight);
+    const auto strict_rejection=shoot_fixed_route(tight_context,seed,limits);
+    check(strict_rejection.status=="strict_rejected"&&!strict_rejection.strict_result,
+        "coarse gate cannot bypass strict disagreement");
+}
 void tests(){
     // A safe screened flyby cannot mask a second, unsafe Venus periapsis later in the route.
     std::vector<EncounterEvent> two_venus{{100,"venus","origin","axes",120000,0,{}},
@@ -199,6 +255,7 @@ void tests(){
         "Venus unsafe actual encounter");
     const auto s=source();auto q=fixture(s);
     probe_tests(s,q);
+    shooting_tests(s,q);
     auto bad=q;bad.expected_snapshot_hash="stale";rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"hash");
     bad=q;bad.route.mars_venus.snapshot_hash="other";
     rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"leg provenance");
@@ -281,6 +338,9 @@ void tests(){
     check(runtime_diagnostic.snapshot_hash==hash&&runtime_diagnostic.source_confidence=="runtime_observed_uncompared"&&
         runtime_diagnostic.ephemeris_metadata.frame_origin==loaded.snapshot.frame.origin&&
         runtime_diagnostic.selected_venus,"runtime probe exact source and actual Venus event");
+    const auto runtime_shot=shoot_fixed_route(runtime_probe,probe_trial(rq),{0.01,1000.0,3,40});
+    check(runtime_shot.status=="checkpointed_accepted"&&runtime_shot.strict_result&&
+        runtime_shot.strict_result->snapshot_hash==hash,"runtime shooting retains exact source for strict gate");
     rejects([&]{prepare_route_probe_runtime(bytes,std::string(64,'0'),rq);},"hash");
     rejects([&]{prepare_route_probe_runtime(bytes+" ",hash,rq);},"hash");
     rejects([&]{evaluate_fixed_route_runtime(bytes,std::string(64,'0'),rq);},"hash");
@@ -300,6 +360,7 @@ void tests(){
     rejects([&]{evaluate_fixed_route_runtime(thick_bytes,thick_hash,thick_q);},"unsafe");
     const auto thick_probe=prepare_route_probe_runtime(thick_bytes,thick_hash,thick_q);
     rejects([&]{probe_route_trial(thick_probe,probe_trial(thick_q));},"unsafe");
+    rejects([&]{shoot_fixed_route(thick_probe,probe_trial(thick_q),{0.01,1000.0,3,40});},"unsafe");
     rejects([&]{evaluate_fixed_route_synthetic_fixture(loaded.snapshot,rq);},"synthetic_fixture");
     auto untrusted=rq;untrusted.route.home_mars.screening_score_mps=1e99;
     untrusted.route.home_mars.lambert.position_residual_m=1e99;
