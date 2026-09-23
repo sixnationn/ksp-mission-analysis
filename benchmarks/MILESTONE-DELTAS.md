@@ -260,3 +260,13 @@ The `milestones/m5-tester-handoff.json` checkpoint was captured at 09:43:37 UTC 
 | gpt-6-sol | medium | 2,370,935 | 2,354,304 | 16,631 | 6,659 | 2,566 |
 
 Sol high, Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Linux Mint view and Proton capture checkpoint
+
+The `milestones/m5-mint-view-proton.json` checkpoint was captured at 11:21:02 UTC on 23 September 2026, against `milestones/m5-mint-view-proton-start.json` from 11:06:58. This interval includes the Linux Mint screenshot review, viewport and camera fixes, inclined five-body synthetic fixture, Proton capture guide, local checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | max | 9,438,280 | 9,349,376 | 88,904 | 25,992 | 14,955 |
+
+Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.

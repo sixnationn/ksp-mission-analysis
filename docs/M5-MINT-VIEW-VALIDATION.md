@@ -16,9 +16,16 @@ planetary integrator and spacecraft force calculation already iterate over
 all bodies in the imported snapshot; the current requested route still has
 one stay target and one flyby target.
 
+Commit `5341c2a` makes the overhead drag clamp reversible: dragging down after
+reaching the top view immediately tilts the camera back toward the orbital
+plane. [CI run 35853537274](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35853537274)
+passed all six Ubuntu and Windows jobs and uploaded the
+`ksp-desktop-ubuntu-tester` artifact from that commit.
+
 The new headless geometry check covers equal screen-pixel radii at ultrawide,
 square and portrait viewports, drag bounds and an inclined tangential orbit.
-The MSYS2 UCRT64 desktop built and the full local CTest suite passed 17/17.
+The MSYS2 UCRT64 desktop built and the full local CTest suite passed 17/17;
+the focused view test also passed after the drag correction.
 This is source and mathematical evidence. The corrected GTK scene still needs
 rendered inspection on the tester's Linux Mint display, including resize,
 drag, Top view, marker selection and the extra inclined orbit.
