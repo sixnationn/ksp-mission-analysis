@@ -8,12 +8,21 @@
 namespace ksp {
 struct Impulse { double ut_s=0; Vec3 delta_v_mps; };
 struct AtmosphereBoundary { std::string body_id; double altitude_m=0; };
+struct RadiusMonitor { std::string body_id; double start_ut_s=0,end_ut_s=0; };
+struct RadiusExtrema {
+    std::string body_id; double start_ut_s=0,end_ut_s=0;
+    double minimum_m=0,maximum_m=0,minimum_ut_s=0,maximum_ut_s=0;
+    // Conditional fitted-model interval estimates, not accumulated global-error bounds.
+    double model_interval_lower_m=0,model_interval_upper_m=0;
+    std::size_t endpoint_count=0,root_count=0;
+};
 struct SpacecraftSettings {
     double start_ut_s=0,end_ut_s=0;
     double abs_position_tolerance_m=0,abs_velocity_tolerance_mps=0,relative_tolerance=0;
     double min_step_s=0,max_step_s=0,safety_margin_m=0;
     std::vector<Impulse> burns;
     std::vector<AtmosphereBoundary> atmosphere_boundaries;
+    std::optional<RadiusMonitor> radius_monitor;
     std::size_t max_accepted_steps=1000000;
 };
 struct BurnRecord { double ut_s=0; State before,after; Vec3 delta_v_mps; double delta_v_magnitude_mps=0; };
@@ -22,6 +31,7 @@ struct SpacecraftResult {
     bool success=false; State final_state; double final_ut_s=0;
     std::vector<BurnRecord> burns; std::vector<EncounterEvent> closest_approaches;
     std::optional<EncounterEvent> unsafe;
+    std::optional<RadiusExtrema> monitored_radius;
     std::size_t accepted_steps=0,rejected_steps=0;
     double smallest_accepted_step_s=0,largest_accepted_step_s=0;
     double requested_abs_position_tolerance_m=0,requested_abs_velocity_tolerance_mps=0,requested_relative_tolerance=0;

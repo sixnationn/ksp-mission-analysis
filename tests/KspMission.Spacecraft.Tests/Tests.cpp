@@ -126,6 +126,23 @@ void eccentric_and_hyperbolic(){
     s.bodies[0].radius_m=8e6;ep=planets(s,30000);
     out=propagate(s,ep,y,q);check(!out.success&&out.unsafe,"hyperbolic clearance rejected");
 }
+void monitored_eccentric_radius(){
+    constexpr double mu=3.986004418e14,rp=1e7,ecc=0.3;
+    const double semimajor=rp/(1-ecc),ra=semimajor*(1+ecc);
+    const double period=2*std::acos(-1.0)*std::sqrt(semimajor*semimajor*semimajor/mu);
+    auto s=system(std::ceil(period/100)*100);auto ep=planets(s,std::ceil(period/100)*100);
+    auto q=options(period);q.radius_monitor=RadiusMonitor{"primary",0,period};
+    State initial{{rp,0,0},{0,std::sqrt(mu*(1+ecc)/rp),0}};
+    const auto out=propagate(s,ep,initial,q);
+    check(out.success&&out.monitored_radius.has_value(),"continuous monitor returned");
+    const auto& r=*out.monitored_radius;
+    check(r.endpoint_count>=2&&r.root_count>=1,"monitor includes endpoints and apoapsis root");
+    check(std::abs(r.minimum_m-rp)<1&&std::abs(r.maximum_m-ra)<1,"eccentric root extrema");
+    check(r.model_interval_lower_m<=rp&&r.model_interval_upper_m>=ra,
+        "continuous interval bounds enclose analytic extrema");
+    q.radius_monitor=RadiusMonitor{"missing",0,period};
+    fails([&]{propagate(s,ep,initial,q);},"radius monitor");
+}
 State independent_derivative(const Snapshot& s,const Ephemeris& e,double t,State y){
     State z;z.position_m=y.velocity_mps;
     for(std::size_t j=0;j<s.bodies.size();++j){
@@ -198,4 +215,4 @@ void curved_between_sample_entry(){
     fails([&]{propagate(s,e,y,q);},"unsafe interval unresolved");
 }
 }
-int main(){try{gates();circular_and_burn();unsafe_and_event();eccentric_and_hyperbolic();moving_three_body();translated_frame();curved_between_sample_entry();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+int main(){try{gates();circular_and_burn();unsafe_and_event();eccentric_and_hyperbolic();monitored_eccentric_radius();moving_three_body();translated_frame();curved_between_sample_entry();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

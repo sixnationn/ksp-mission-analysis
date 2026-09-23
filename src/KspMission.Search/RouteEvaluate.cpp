@@ -68,7 +68,8 @@ Dates validate(const Snapshot& s,const RouteEvaluationRequest& q){
     for(double v:{q.fixed_position_tolerance_m,q.fixed_velocity_tolerance_mps,q.parking_radius_tolerance_m,
         q.parking_radial_velocity_tolerance_mps,q.parking_tangential_speed_tolerance_mps,
         q.venus_window_halfwidth_s,q.venus_max_encounter_radius_m,q.disagreement_position_m,
-        q.disagreement_velocity_mps,q.disagreement_event_time_s})positive(v,"acceptance tolerance");
+        q.disagreement_velocity_mps,q.disagreement_event_time_s,
+        q.disagreement_mars_extremum_radius_m,q.disagreement_mars_extremum_time_s})positive(v,"acceptance tolerance");
     nonnegative(q.venus_safety_margin_m,"Venus safety margin");
     for(double v:{q.home_parking_altitude_m,q.mars_parking_altitude_m,q.home_capture_altitude_m})
         nonnegative(v,"parking altitude");
@@ -139,19 +140,29 @@ RoutePass pass(const Snapshot& s,const Ephemeris& e,const RouteEvaluationRequest
     settings.burns={{d.launch,q.impulses_mps[0]},{d.arrival,q.impulses_mps[1]},
         {d.departure,q.impulses_mps[2]},{d.home,q.impulses_mps[3]}};
     settings.atmosphere_boundaries=q.atmosphere_boundaries;settings.safety_margin_m=0;
+    settings.radius_monitor=RadiusMonitor{d.mars_id,d.arrival,d.departure};
     SpacecraftResult result;
     try{result=propagate(s,e,q.launch_parking_state,settings);}
     catch(const SpacecraftError& error){throw RouteEvaluationError(std::string("unsafe or unresolved propagation: ")+error.what());}
     if(!result.success||result.unsafe)throw RouteEvaluationError("unsafe intermediate encounter or collision");
     if(result.burns.size()!=4)throw RouteEvaluationError("exactly four fixed burns required");
+    if(!result.monitored_radius||result.monitored_radius->endpoint_count!=2)
+        throw RouteEvaluationError("Mars radius monitor unresolved");
     RoutePass out;out.accepted_steps=result.accepted_steps;out.rejected_steps=result.rejected_steps;
+    out.mars_stay_radius=*result.monitored_radius;
     std::copy(result.burns.begin(),result.burns.end(),out.burns.begin());
     out.checkpoints[0]=parking(s,e,q,"launch",d.home_id,out.burns[0].before,d.launch,0,q.home_parking_altitude_m);
     out.checkpoints[1]=parking(s,e,q,"Mars capture",d.mars_id,out.burns[1].after,d.arrival,1,q.mars_parking_altitude_m);
     out.checkpoints[2]=parking(s,e,q,"Mars pre-departure",d.mars_id,out.burns[2].before,d.departure,2,q.mars_parking_altitude_m);
-    out.checkpoints[3]=parking(s,e,q,"home return capture",d.home_id,out.burns[3].after,d.home,3,q.home_capture_altitude_m);
     if(std::abs(norm(out.checkpoints[2].relative.position_m)-norm(out.checkpoints[1].relative.position_m))>
        q.parking_radius_tolerance_m)throw RouteEvaluationError("Mars parking drift excessive without stationkeeping");
+    const auto& mars=body(s,d.mars_id);
+    const double shell=mars.radius_m+q.mars_parking_altitude_m;
+    if(out.mars_stay_radius.model_interval_lower_m<=mars.radius_m+atmosphere(q,d.mars_id)||
+       out.mars_stay_radius.model_interval_lower_m<shell-q.parking_radius_tolerance_m||
+       out.mars_stay_radius.model_interval_upper_m>shell+q.parking_radius_tolerance_m)
+        throw RouteEvaluationError("Mars interior parking radius bound failed");
+    out.checkpoints[3]=parking(s,e,q,"home return capture",d.home_id,out.burns[3].after,d.home,3,q.home_capture_altitude_m);
     const double boundary=body(s,d.venus_id).radius_m+atmosphere(q,d.venus_id)+q.venus_safety_margin_m;
     out.venus=select_safe_venus_encounter(result.closest_approaches,d.venus_id,d.venus,
         q.venus_window_halfwidth_s,boundary,q.venus_max_encounter_radius_m);
@@ -203,6 +214,19 @@ RouteEvaluationResult evaluate_core(const Snapshot& s,const RouteEvaluationReque
         out.total_charged_delta_v_mps+=out.coarse.burns[i].delta_v_magnitude_mps;
     }
     out.venus_event_time_disagreement_s=std::abs(out.coarse.venus.ut_s-out.strict.venus.ut_s);
+    out.mars_minimum_radius_disagreement_m=std::abs(out.coarse.mars_stay_radius.minimum_m-
+        out.strict.mars_stay_radius.minimum_m);
+    out.mars_maximum_radius_disagreement_m=std::abs(out.coarse.mars_stay_radius.maximum_m-
+        out.strict.mars_stay_radius.maximum_m);
+    out.mars_minimum_time_disagreement_s=std::abs(out.coarse.mars_stay_radius.minimum_ut_s-
+        out.strict.mars_stay_radius.minimum_ut_s);
+    out.mars_maximum_time_disagreement_s=std::abs(out.coarse.mars_stay_radius.maximum_ut_s-
+        out.strict.mars_stay_radius.maximum_ut_s);
+    if(out.mars_minimum_radius_disagreement_m>q.disagreement_mars_extremum_radius_m||
+       out.mars_maximum_radius_disagreement_m>q.disagreement_mars_extremum_radius_m||
+       out.mars_minimum_time_disagreement_s>q.disagreement_mars_extremum_time_s||
+       out.mars_maximum_time_disagreement_s>q.disagreement_mars_extremum_time_s)
+        throw RouteEvaluationError("Mars extrema disagreement exceeds separate budgets");
     out.venus_radius_disagreement_m=std::abs(out.coarse.venus.distance_m-out.strict.venus.distance_m);
     const auto c_venus=venus_relative(coarse,out.coarse.venus),s_venus=venus_relative(strict,out.strict.venus);
     out.maximum_checkpoint_position_disagreement_m=std::max(out.maximum_checkpoint_position_disagreement_m,

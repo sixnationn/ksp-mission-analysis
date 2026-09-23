@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -110,6 +111,7 @@ RouteEvaluationRequest fixture(const Snapshot& s){
     q.parking_tangential_speed_tolerance_mps=0.01;
     q.venus_window_halfwidth_s=100000;q.venus_max_encounter_radius_m=2000000;q.venus_safety_margin_m=10000;
     q.disagreement_position_m=1000;q.disagreement_velocity_mps=0.01;q.disagreement_event_time_s=10;
+    q.disagreement_mars_extremum_radius_m=1000;q.disagreement_mars_extremum_time_s=stay;
     q.coarse_ephemeris={0,home_return,1000,10,1e-5,100000};
     q.strict_ephemeris={0,home_return,500,1,1e-6,100000};
     q.coarse_spacecraft=spacecraft(0,home_return);q.strict_spacecraft=spacecraft(0,home_return,true);
@@ -165,6 +167,8 @@ void tests(){
     bad=q;bad.disagreement_position_m=1e-12;rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"disagreement");
     bad=q;bad.disagreement_velocity_mps=1e-12;rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"disagreement");
     bad=q;bad.disagreement_event_time_s=1e-12;rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"disagreement");
+    bad=q;bad.disagreement_mars_extremum_radius_m=1e-12;
+    rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"Mars extrema disagreement");
     bad=q;bad.coarse_spacecraft.burns.push_back({encounter,{1,0,0}});
     rejects([&]{evaluate_fixed_route_synthetic_fixture(s,bad);},"extra burns");
     auto absent=s;absent.bodies.erase(std::remove_if(absent.bodies.begin(),absent.bodies.end(),
@@ -175,6 +179,30 @@ void tests(){
     check(result.coarse.venus.body_id=="venus"&&result.coarse.venus.distance_m<q.venus_max_encounter_radius_m,
           "actual Venus event");
     check(result.total_charged_delta_v_mps>0,"charged delta-v");
+    auto excursion=q;excursion.impulses_mps[1].x+=0.1;
+    excursion.fixed_position_tolerance_m=1e6;excursion.fixed_velocity_tolerance_mps=1;
+    excursion.parking_radius_tolerance_m=20000;
+    excursion.parking_radial_velocity_tolerance_mps=0.2;
+    excursion.parking_tangential_speed_tolerance_mps=0.2;
+    const auto excursion_ephemeris=integrate(s,excursion.coarse_ephemeris);
+    auto excursion_settings=excursion.coarse_spacecraft;
+    excursion_settings.burns={{0,excursion.impulses_mps[0]},{arrival,excursion.impulses_mps[1]},
+        {departure,excursion.impulses_mps[2]},{home_return,excursion.impulses_mps[3]}};
+    excursion_settings.radius_monitor=RadiusMonitor{"mars",arrival,departure};
+    const auto excursion_run=propagate(s,excursion_ephemeris,excursion.launch_parking_state,excursion_settings);
+    check(excursion_run.success&&excursion_run.burns.size()==4,"manufactured eccentric Mars coast propagates");
+    const double capture_radius=norm(relative(excursion_ephemeris,"mars",excursion_run.burns[1].after,arrival).position_m);
+    const double departure_radius=norm(relative(excursion_ephemeris,"mars",excursion_run.burns[2].before,departure).position_m);
+    check(std::abs(capture_radius-1e6)<excursion.parking_radius_tolerance_m&&
+          std::abs(departure_radius-1e6)<excursion.parking_radius_tolerance_m,
+          "eccentric stay endpoints within radius shell");
+    check(excursion_run.monitored_radius&&
+          excursion_run.monitored_radius->maximum_m>1e6+excursion.parking_radius_tolerance_m,
+          "actual interior apoapsis exceeds parking shell");
+    rejects([&]{evaluate_fixed_route_synthetic_fixture(s,excursion);},"Mars interior parking radius");
+    check(result.coarse.mars_stay_radius.endpoint_count>=2&&
+        result.coarse.mars_stay_radius.model_interval_lower_m>0,
+        "Mars stay continuous radius enclosure");
     for(const auto& burn:result.coarse.burns)
         check(norm(burn.before.position_m-burn.after.position_m)==0,"position continuous through burn");
     auto tight=s;tight.snapshot_hash="tight-venus-v1";
@@ -216,11 +244,16 @@ void tests(){
     const auto seeded=evaluate_fixed_route_runtime(bytes,hash,untrusted);
     check(seeded.total_charged_delta_v_mps==runtime_result.total_charged_delta_v_mps,
         "screen seed evidence not trusted for fixed impulse result");
-    std::cout<<"PASS "<<checks<<" route evaluation checks; Venus distance m="<<result.coarse.venus.distance_m
+    std::cout<<std::setprecision(12)<<"PASS "<<checks<<" route evaluation checks; Venus distance m="<<result.coarse.venus.distance_m
              <<" radius disagreement m="<<result.venus_radius_disagreement_m
              <<" event time disagreement s="<<result.venus_event_time_disagreement_s
              <<" max position disagreement m="<<result.maximum_checkpoint_position_disagreement_m
-             <<" max velocity disagreement m/s="<<result.maximum_checkpoint_velocity_disagreement_mps<<'\n';
+             <<" max velocity disagreement m/s="<<result.maximum_checkpoint_velocity_disagreement_mps
+             <<" Mars observed min/max m="<<result.coarse.mars_stay_radius.minimum_m<<'/'
+             <<result.coarse.mars_stay_radius.maximum_m
+             <<" Mars model interval lower/upper m="<<result.coarse.mars_stay_radius.model_interval_lower_m<<'/'
+             <<result.coarse.mars_stay_radius.model_interval_upper_m
+             <<" eccentric interior apo m="<<excursion_run.monitored_radius->maximum_m<<'\n';
 }
 }
 int main(){try{tests();return 0;}catch(const std::exception& error){std::cerr<<"FAIL "<<error.what()<<'\n';return 1;}}

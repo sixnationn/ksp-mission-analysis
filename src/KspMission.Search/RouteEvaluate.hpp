@@ -19,6 +19,7 @@ struct RouteEvaluationRequest {
            parking_tangential_speed_tolerance_mps=0;
     double venus_window_halfwidth_s=0,venus_max_encounter_radius_m=0,venus_safety_margin_m=0;
     double disagreement_position_m=0,disagreement_velocity_mps=0,disagreement_event_time_s=0;
+    double disagreement_mars_extremum_radius_m=0,disagreement_mars_extremum_time_s=0;
     Settings coarse_ephemeris,strict_ephemeris;
     SpacecraftSettings coarse_spacecraft,strict_spacecraft;
     // Used only by evaluate_fixed_route_synthetic_fixture; runtime values come from exact bytes.
@@ -32,6 +33,7 @@ struct RouteCheckpoint {
 struct RoutePass {
     std::array<RouteCheckpoint,4> checkpoints;
     EncounterEvent venus;
+    RadiusExtrema mars_stay_radius;
     std::array<BurnRecord,4> burns;
     std::size_t accepted_steps=0,rejected_steps=0;
 };
@@ -43,6 +45,8 @@ struct RouteEvaluationResult {
     double maximum_checkpoint_position_disagreement_m=0,
            maximum_checkpoint_velocity_disagreement_mps=0,
            venus_event_time_disagreement_s=0,venus_radius_disagreement_m=0;
+    double mars_minimum_radius_disagreement_m=0,mars_maximum_radius_disagreement_m=0,
+           mars_minimum_time_disagreement_s=0,mars_maximum_time_disagreement_s=0;
     double total_charged_delta_v_mps=0;
 };
 class RouteEvaluationError:public std::runtime_error {public:using std::runtime_error::runtime_error;};

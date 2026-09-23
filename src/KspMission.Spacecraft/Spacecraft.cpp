@@ -71,6 +71,17 @@ void validate(const Snapshot& s,const Ephemeris& e,State y,const SpacecraftSetti
     for(const auto& body:s.bodies)
         if(std::find(atmosphere_ids.begin(),atmosphere_ids.end(),body.id)==atmosphere_ids.end())
             throw SpacecraftError("missing atmosphere boundary for body "+body.id+" (use explicit zero for none)");
+    if(q.radius_monitor){
+        const auto& m=*q.radius_monitor;
+        if(std::find(e.body_ids.begin(),e.body_ids.end(),m.body_id)==e.body_ids.end()||
+           !finite(m.start_ut_s)||!finite(m.end_ut_s)||m.start_ut_s>=m.end_ut_s||
+           m.start_ut_s<q.start_ut_s||m.end_ut_s>q.end_ut_s)
+            throw SpacecraftError("radius monitor body or interval invalid");
+        const auto boundary=[&](double ut){return ut==q.start_ut_s||ut==q.end_ut_s||
+            std::any_of(q.burns.begin(),q.burns.end(),[&](const Impulse& b){return b.ut_s==ut;});};
+        if(!boundary(m.start_ut_s)||!boundary(m.end_ut_s))
+            throw SpacecraftError("radius monitor endpoints must be burn or propagation boundaries");
+    }
 }
 double atmosphere(const SpacecraftSettings& q,const std::string& id){
     auto it=std::find_if(q.atmosphere_boundaries.begin(),q.atmosphere_boundaries.end(),[&](const AtmosphereBoundary& x){return x.body_id==id;});
@@ -194,6 +205,51 @@ void events(const Snapshot& s,const Ephemeris& e,const SpacecraftSettings& q,Spa
         result.unsafe=first_unsafe;result.success=false;result.final_ut_s=first_unsafe->ut_s;result.final_state=first_unsafe->spacecraft_state;
     }
 }
+void monitor_point(const Ephemeris& e,RadiusExtrema& extrema,const std::string& id,double t,State y,bool endpoint){
+    const double distance=norm(y.position_m-e.query(id,t).position_m);
+    if(!finite(distance))throw SpacecraftError("radius monitor distance nonfinite",t,y);
+    if(distance<extrema.minimum_m){extrema.minimum_m=distance;extrema.minimum_ut_s=t;}
+    if(distance>extrema.maximum_m){extrema.maximum_m=distance;extrema.maximum_ut_s=t;}
+    if(endpoint)++extrema.endpoint_count;else ++extrema.root_count;
+}
+void monitor_step(const Snapshot& s,const Ephemeris& e,const SpacecraftSettings& q,
+    RadiusExtrema& extrema,double t,State y,double h,State endpoint){
+    const auto& id=extrema.body_id;
+    const auto index=static_cast<std::size_t>(std::find_if(s.bodies.begin(),s.bodies.end(),
+        [&](const Body& b){return b.id==id;})-s.bodies.begin());
+    std::array<State,5> points{y,trial(s,e,t,y,h*0.25).high,trial(s,e,t,y,h*0.5).high,
+        trial(s,e,t,y,h*0.75).high,endpoint};
+    for(int part=0;part<4;++part){
+        const double at=t+h*part*0.25,dt=h*0.25;
+        const auto state=points[part];
+        double acceleration=0,travel=0;
+        std::vector<double> separations;
+        for(const auto& b:s.bodies){
+            const double d=norm(state.position_m-e.query(b.id,at).position_m);
+            if(!finite(d)||d<=0)throw SpacecraftError("radius monitor separation invalid",at,state);
+            separations.push_back(d);acceleration+=4*b.mu_m3_s2/(d*d);
+        }
+        if(!finite(acceleration))throw SpacecraftError("radius monitor acceleration bound invalid",at,state);
+        for(std::size_t i=0;i<s.bodies.size();++i){
+            const double displacement=(norm(state.velocity_mps)+body_speed_bound(e,s.bodies[i].id,at,dt))*dt+
+                0.5*acceleration*dt*dt;
+            if(!finite(displacement)||displacement>=0.5*separations[i])
+                throw SpacecraftError("radius monitor interval bound unresolved",at,state);
+            if(i==index)travel=displacement;
+        }
+        const double radius=norm(state.position_m-e.query(id,at).position_m);
+        const double guard=e.metadata.max_position_fit_error_m+q.abs_position_tolerance_m;
+        extrema.model_interval_lower_m=std::min(extrema.model_interval_lower_m,radius-travel-guard);
+        extrema.model_interval_upper_m=std::max(extrema.model_interval_upper_m,radius+travel+guard);
+        const double g0=radial(s,e,points[part],at,index);
+        const double g1=radial(s,e,points[part+1],at+dt,index);
+        if((g0<0&&g1>=0)||(g0>0&&g1<=0)){
+            const double when=root(s,e,t,y,h,part*0.25,(part+1)*0.25,
+                [&](State z,double ut){return radial(s,e,z,ut,index);});
+            monitor_point(e,extrema,id,when,trial(s,e,t,y,when-t).high,false);
+        }
+    }
+}
 }
 SpacecraftResult propagate(const Snapshot& s,const Ephemeris& e,State initial,const SpacecraftSettings& q){
     validate(s,e,initial,q);
@@ -213,6 +269,15 @@ SpacecraftResult propagate(const Snapshot& s,const Ephemeris& e,State initial,co
             for(std::size_t i=0;i<s.bodies.size();++i)if(clearance(s,e,y,t,i,q)<=0)throw SpacecraftError("burn inside body or safety surface",t,y);
             State after=y;after.velocity_mps=after.velocity_mps+b.delta_v_mps;
             result.burns.push_back({t,y,after,b.delta_v_mps,norm(b.delta_v_mps)});y=after;result.final_state=y;
+        }
+        if(q.radius_monitor&&t==q.radius_monitor->start_ut_s&&!result.monitored_radius){
+            RadiusExtrema extrema;extrema.body_id=q.radius_monitor->body_id;
+            extrema.start_ut_s=t;extrema.end_ut_s=q.radius_monitor->end_ut_s;
+            extrema.minimum_m=std::numeric_limits<double>::infinity();
+            extrema.maximum_m=-std::numeric_limits<double>::infinity();
+            extrema.model_interval_lower_m=std::numeric_limits<double>::infinity();
+            extrema.model_interval_upper_m=-std::numeric_limits<double>::infinity();
+            monitor_point(e,extrema,extrema.body_id,t,y,true);result.monitored_radius=extrema;
         }
         if(t>=q.end_ut_s)break;
         const double target=burn_index<burns.size()?std::min(q.end_ut_s,burns[burn_index].ut_s):q.end_ut_s;
@@ -268,6 +333,12 @@ SpacecraftResult propagate(const Snapshot& s,const Ephemeris& e,State initial,co
         if(result.accepted_steps>=q.max_accepted_steps)throw SpacecraftError("accepted step limit",t,y);
         events(s,e,q,result,t,y,dt,candidate.high);
         if(result.unsafe)return result;
+        if(result.monitored_radius&&t>=result.monitored_radius->start_ut_s&&
+           t+dt<=result.monitored_radius->end_ut_s){
+            monitor_step(s,e,q,*result.monitored_radius,t,y,dt,candidate.high);
+            if(t+dt==result.monitored_radius->end_ut_s)
+                monitor_point(e,*result.monitored_radius,result.monitored_radius->body_id,t+dt,candidate.high,true);
+        }
         ++result.accepted_steps;result.smallest_accepted_step_s=result.accepted_steps==1?dt:std::min(result.smallest_accepted_step_s,dt);
         result.largest_accepted_step_s=std::max(result.largest_accepted_step_s,dt);
         result.max_accepted_position_local_error_m=std::max(result.max_accepted_position_local_error_m,p_error);
