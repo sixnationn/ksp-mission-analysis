@@ -214,6 +214,16 @@ void shooting_tests(const Snapshot& s,const RouteEvaluationRequest& q){
     check(repeat.status==repaired.status&&repeat.probe_evaluations==repaired.probe_evaluations&&
         repeat.final_probe.trial.impulses_mps[0].x==repaired.final_probe.trial.impulses_mps[0].x,
         "shooting deterministic");
+    std::size_t reported=0;bool cancel_now=false;
+    const auto interrupted=shoot_fixed_route(context,nearby,limits,
+        [&]{return cancel_now;},[&](std::size_t completed){reported=completed;cancel_now=true;});
+    check(interrupted.status=="cancelled"&&interrupted.probe_evaluations==1&&reported==1&&
+        !interrupted.strict_result,"shooting stops between completed probes");
+    int strict_polls=0;
+    const auto after_strict=shoot_fixed_route(context,seed,limits,
+        [&]{return ++strict_polls>=4;},{});
+    check(after_strict.status=="cancelled"&&!after_strict.strict_result&&
+        after_strict.probe_evaluations==1,"post-strict cancellation removes acceptance");
     auto bad=limits;bad.max_probe_evaluations=0;rejects([&]{shoot_fixed_route(context,seed,bad);},"budget");
     bad=limits;bad.finite_difference_impulse_mps=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{shoot_fixed_route(context,seed,bad);},"limit");
@@ -224,6 +234,14 @@ void shooting_tests(const Snapshot& s,const RouteEvaluationRequest& q){
     const auto exhausted=shoot_fixed_route(context,nearby,bad);
     check(exhausted.status=="budget_exhausted"&&!exhausted.strict_result&&
         exhausted.probe_evaluations==1,"bounded probe budget failure is not acceptance");
+    auto stress=limits;stress.finite_difference_impulse_mps=1000;
+    stress.max_impulse_mps=1e9;stress.max_probe_evaluations=2;
+    std::size_t attempted=0;
+    const auto unsafe_attempt=shoot_fixed_route(context,nearby,stress,{},
+        [&](std::size_t count){attempted=count;});
+    check(unsafe_attempt.status=="unsafe_difference"&&unsafe_attempt.probe_evaluations==2&&
+        attempted==2&&!unsafe_attempt.strict_result,
+        "unsafe finite-difference propagation consumes bounded probe cap");
     auto shifted=q;shifted.route.mars_venus.arrival_ut_s=departure+110000;
     shifted.route.mars_venus.flight_time_s=110000;
     shifted.route.venus_home.departure_ut_s=shifted.route.mars_venus.arrival_ut_s;

@@ -699,5 +699,111 @@ void evaluation_runtime_round_trip(){
              <<" terminal bytes="<<complete.dump().size()<<'\n';
     std::filesystem::remove(path);
 }
+void shooting_worker_protocol(){
+    const auto synthetic=eval_fixture::source();
+    const auto bytes=eval_fixture::runtime_bytes(synthetic),hash=sha256_hex(bytes);
+    const auto loaded=read_runtime_snapshot(bytes,hash);
+    const auto trial=eval_fixture::fixture(loaded.snapshot);
+    const auto path=std::filesystem::temp_directory_path()/("ksp-shoot-worker-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".json");
+    auto write=[&](const std::string& content){std::ofstream file(path,std::ios::binary|std::ios::trunc);
+        file.write(content.data(),static_cast<std::streamsize>(content.size()));};
+    write(bytes);
+    json q={{"protocol_version",1},{"command","shoot_route"},{"request_id","shoot-test"},
+        {"source",{{"mode","runtime_snapshot"},{"path",path.string()},
+            {"expected_snapshot_hash",hash},{"expected_frame_origin",loaded.snapshot.frame.origin},
+            {"expected_frame_axes",loaded.snapshot.frame.axes},{"expected_state_epoch_ut_s",0.0}}},
+        {"trial",evaluation_trial_json(trial)},
+        {"shooting",{{"finite_difference_impulse_mps",0.01},{"max_impulse_mps",1000.0},
+            {"max_iterations",6},{"max_probe_evaluations",80}}}};
+    q["trial"]["impulses_mps"][0][0]=trial.impulses_mps[0].x+0.001;
+    const auto events=run(q.dump());
+    check(has(events,"started")&&has(events,"progress")&&has(events,"complete")&&
+        events.back()["status"]=="checkpointed_accepted"&&events.back().contains("strict"),
+        "runtime shooting repairs nearby impulse and reports strict result");
+    check(events.back()["snapshot_hash"]==hash&&events.back()["final_trial"]["impulses_mps"].size()==4&&
+        events.back()["result_label"]=="independent_nbody_fixed_impulse_checkpointed_only",
+        "shooting accepted result retains source and physical trial");
+    auto replay_request=q;replay_request["command"]="evaluate_route";
+    replay_request.erase("shooting");
+    for(const char* field:{"launch_parking_state","impulses_mps","checkpoint_targets_relative"})
+        replay_request["trial"][field]=events.back()["final_trial"][field];
+    const auto replay=run(replay_request.dump());
+    check(replay.back()["type"]=="complete"&&
+        replay.back()["coarse"]["burns"]==events.back()["strict"]["coarse"]["burns"]&&
+        replay.back()["strict"]["checkpoints"]==events.back()["strict"]["fine"]["checkpoints"]&&
+        replay.back()["disagreement"]==events.back()["strict"]["disagreement"]&&
+        replay.back()["total_charged_delta_v_mps"]==events.back()["strict"]["total_charged_delta_v_mps"],
+        "serialized final physical trial reproduces strict evaluation on exact source");
+    std::size_t previous=0,terminals=0;
+    for(const auto& event:events){
+        if(event["type"]=="progress"){
+            const auto count=event["completed_probes"].get<std::size_t>();
+            check(count>=previous&&count<=80&&event["snapshot_hash"]==hash&&
+                event["source_confidence"]=="runtime_observed_uncompared", "shooting progress bounded and sourced");
+            previous=count;
+        }
+        if(event["type"]=="complete"||event["type"]=="error"||event["type"]=="cancelled")++terminals;
+    }
+    check(terminals==1&&events.back()["completed_probes"]==previous&&
+        events.back().dump().size()<1024*1024,"shooting one bounded terminal with final progress");
+    auto bad=q;bad["shooting"]["max_probe_evaluations"]=0;
+    check(!has(run(bad.dump()),"started"),"invalid shooting cap rejects pre-start");
+    bad=q;bad["shooting"]["extra"]=1;
+    check(!has(run(bad.dump()),"started"),"unknown shooting field rejects pre-start");
+    bad=q;bad["source"]["mode"]="synthetic_fixture";
+    check(!has(run(bad.dump()),"started"),"shooting runtime-only source gate");
+    bad=q;bad["source"]["expected_snapshot_hash"]=std::string(64,'0');
+    check(!has(run(bad.dump()),"started"),"shooting stale hash pre-start");
+    bad=q;bad["source"]["expected_frame_axes"]="wrong";
+    check(!has(run(bad.dump()),"started"),"shooting wrong frame pre-start");
+    bad=q;bad["source"]["expected_state_epoch_ut_s"]=1;
+    check(!has(run(bad.dump()),"started"),"shooting wrong epoch pre-start");
+    bad=q;bad["trial"]["impulses_mps"][0][0]=1001;
+    check(!has(run(bad.dump()),"started"),"shooting over-limit seed pre-start");
+    bad=q;bad["trial"]["impulses_mps"][0]=json::array({1,2});
+    check(!has(run(bad.dump()),"started"),"shooting malformed vector pre-start");
+    bad=q;bad["trial"]["atmosphere_boundaries"]=json::array();
+    check(!has(run(bad.dump()),"started"),"shooting hidden atmosphere pre-start");
+    bad=q;bad["source"]["source_confidence"]="synthetic_fixture";
+    check(!has(run(bad.dump()),"started"),"shooting hidden confidence pre-start");
+    bad=q;bad["trial"]["venus_window_halfwidth_s"]=1e-6;
+    const auto missing=run(bad.dump());
+    check(missing.back()["type"]=="complete"&&missing.back()["result_label"]==
+        "independent_nbody_coarse_trial_diagnostic_only"&&!missing.back().contains("strict"),
+        "missing Venus root remains diagnostic");
+    bad=q;bad["trial"]["venus_max_encounter_radius_m"]=500000;
+    const auto impossible=run(bad.dump());
+    check(impossible.back()["type"]=="complete"&&impossible.back()["status"]!=
+        "checkpointed_accepted"&&!impossible.back().contains("strict"),
+        "impossible Venus encounter radius remains diagnostic");
+    bad=q;bad["trial"]["impulses_mps"][0][0]=trial.impulses_mps[0].x;
+    bad["trial"]["disagreement_position_m"]=1e-12;
+    const auto strict_rejected=run(bad.dump());
+    check(strict_rejected.back()["type"]=="complete"&&strict_rejected.back()["status"]==
+        "strict_rejected"&&!strict_rejected.back().contains("strict"),
+        "strict disagreement rejects coarse shooting trial");
+    const auto cancelled=run(q.dump(),[](){return true;});
+    check(cancelled.back()["type"]=="cancelled"&&!has(cancelled,"complete"),
+        "shooting pre-work cancellation terminal");
+    int polls=0;const auto between=run(q.dump(),[&]{return ++polls>=5;});
+    check(between.back()["type"]=="cancelled"&&!has(between,"complete")&&
+        between.back()["completed_probes"]==1,"shooting cancellation between probes");
+    auto exact=q;exact["trial"]["impulses_mps"][0][0]=trial.impulses_mps[0].x;
+    polls=0;const auto after_strict=run(exact.dump(),[&]{return ++polls>=6;});
+    check(after_strict.back()["type"]=="cancelled"&&!has(after_strict,"complete"),
+        "shooting post-strict cancellation suppresses acceptance");
+    auto changed=bytes;changed[changed.size()-2]=changed[changed.size()-2]=='0'?'1':'0';
+    const auto changed_events=run(q.dump(),[](){return false;},[&](){write(changed);});
+    check(changed_events.back()["code"]=="source_changed"&&!has(changed_events,"started"),
+        "shooting same-length source rewrite pre-start");
+    const auto thick=eval_fixture::runtime_bytes(synthetic,1e6),thick_hash=sha256_hex(thick);
+    write(thick);bad=q;bad["source"]["expected_snapshot_hash"]=thick_hash;
+    bad["trial"]["route_seed"]["snapshot_hash"]=thick_hash;
+    const auto unsafe=run(bad.dump());
+    check(unsafe.back()["type"]=="error"&&!has(unsafe,"complete"),
+        "shooting parsed Venus atmosphere prevents success");
+    std::filesystem::remove(path);
 }
-int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();mission_cache_protocol();evaluation_protocol_failures();evaluation_runtime_round_trip();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+}
+int main(){try{protocol_failures();success_and_cancel();refinement_status();no_screened_seed();review_failures();runtime_mode();candidate_identity();mission_protocol();mission_runtime_mode();mission_cache_protocol();evaluation_protocol_failures();evaluation_runtime_round_trip();shooting_worker_protocol();std::cout<<"PASS "<<checks<<" checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

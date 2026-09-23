@@ -394,7 +394,8 @@ std::optional<Vec3> solve_three(double matrix[3][3],Vec3 residual){
 }
 }
 RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const RouteProbeTrial& seed,
-    const RouteShootingLimits& limits){
+    const RouteShootingLimits& limits,const std::function<bool()>& cancelled,
+    const std::function<void(std::size_t)>& progress){
     const auto& q=context.baseline_;const auto& s=context.snapshot_;
     if(!finite(limits.finite_difference_impulse_mps)||limits.finite_difference_impulse_mps<=0||
        !finite(limits.max_impulse_mps)||limits.max_impulse_mps<=0)
@@ -411,12 +412,21 @@ RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const Rou
             throw RouteEvaluationError("shooting seed impulse exceeds bound");
     }
     const auto dates=validate(s,q);
-    RouteShootingResult out;RouteProbeTrial current_trial=seed;
+    RouteShootingResult out;RouteProbeTrial current_trial=seed;bool was_cancelled=false;
     auto evaluate=[&](const RouteProbeTrial& trial)->std::optional<RouteProbeResult>{
+        if(cancelled&&cancelled()){was_cancelled=true;return std::nullopt;}
         if(out.probe_evaluations>=limits.max_probe_evaluations)return std::nullopt;
-        ++out.probe_evaluations;return probe_route_trial(context,trial);
+        ++out.probe_evaluations;
+        std::optional<RouteProbeResult> result;
+        try{result=probe_route_trial(context,trial);}
+        catch(...){if(progress)progress(out.probe_evaluations);throw;}
+        if(progress)progress(out.probe_evaluations);
+        return result;
     };
-    out.final_probe=*evaluate(current_trial);
+    auto initial=evaluate(current_trial);
+    if(!initial){out.status=was_cancelled?"cancelled":"budget_exhausted";return out;}
+    out.final_probe=std::move(*initial);
+    if(cancelled&&cancelled()){out.status="cancelled";return out;}
     auto coarse_reason=[&](const RouteProbeResult& probe)->std::string{
         if(!probe.selected_venus)return "missing_venus";
         if(!probe.minimum_observed_venus_boundary_margin_m||
@@ -436,12 +446,15 @@ RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const Rou
                 return "coarse_constraints_failed";
         return {};
     };
-    auto strict_gate=[&](){auto request=q;request.impulses_mps=current_trial.impulses_mps;
+    auto strict_gate=[&](){
+        if(cancelled&&cancelled()){out.status="cancelled";return;}
+        auto request=q;request.impulses_mps=current_trial.impulses_mps;
         try{
             if(context.runtime_bytes_.empty())out.strict_result=evaluate_fixed_route_synthetic_fixture(s,request);
             else out.strict_result=evaluate_fixed_route_runtime(context.runtime_bytes_,context.runtime_hash_,request);
             out.status="checkpointed_accepted";
         }catch(const RouteEvaluationError&){out.status="strict_rejected";}
+        if(cancelled&&cancelled()){out.strict_result.reset();out.status="cancelled";}
     };
     if(coarse_reason(out.final_probe).empty()){strict_gate();return out;}
     for(std::size_t iteration=0;iteration<limits.max_iterations;++iteration){
@@ -463,7 +476,7 @@ RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const Rou
                     if(!finite(norm(difference.impulses_mps[block]))||norm(difference.impulses_mps[block])>limits.max_impulse_mps){out.status="impulse_bound";return out;}
                     std::optional<RouteProbeResult> sample;
                     try{sample=evaluate(difference);}catch(const RouteEvaluationError&){out.status="unsafe_difference";return out;}
-                    if(!sample){out.status="budget_exhausted";return out;}
+                    if(!sample){out.status=was_cancelled?"cancelled":"budget_exhausted";return out;}
                     const auto derivative=(block_residual(*sample,block)-residual)*(1.0/h);
                     for(int row=0;row<3;++row)jacobian[row][col]=axis(derivative,row);
                 }
@@ -477,7 +490,7 @@ RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const Rou
                    norm(candidate.impulses_mps[block])>limits.max_impulse_mps)continue;
                 std::optional<RouteProbeResult> sample;
                 try{sample=evaluate(candidate);}catch(const RouteEvaluationError&){continue;}
-                if(!sample){out.status="budget_exhausted";return out;}
+                if(!sample){out.status=was_cancelled?"cancelled":"budget_exhausted";return out;}
                 if(norm(block_residual(*sample,block))<norm(residual)){
                     current_trial=std::move(candidate);out.final_probe=std::move(*sample);accepted=true;changed=true;break;
                 }

@@ -316,8 +316,42 @@ json evaluation_pass_json(const RoutePass& pass){
             {"model_interval_lower_m",r.model_interval_lower_m},{"model_interval_upper_m",r.model_interval_upper_m},
             {"endpoint_count",r.endpoint_count},{"root_count",r.root_count}}}};
 }
+json shooting_trial_json(const RouteProbeTrial& trial){
+    auto state=[](const State& value){return json{{"position_m",vector_json(value.position_m)},
+        {"velocity_mps",vector_json(value.velocity_mps)}};};
+    json impulses=json::array(),targets=json::array();
+    for(const auto& impulse:trial.impulses_mps)impulses.push_back(vector_json(impulse));
+    for(const auto& target:trial.checkpoint_targets_relative)targets.push_back(state(target));
+    return {{"launch_parking_state",state(trial.launch_parking_state)},
+        {"impulses_mps",impulses},{"checkpoint_targets_relative",targets}};
+}
+json shooting_probe_json(const RouteProbeResult& probe){
+    json checkpoints=json::array(),burns=json::array();
+    for(const auto& point:probe.checkpoints)checkpoints.push_back({{"name",point.name},{"ut_s",point.ut_s},
+        {"signed_position_residual_m",vector_json(point.signed_position_residual_m)},
+        {"signed_velocity_residual_mps",vector_json(point.signed_velocity_residual_mps)},
+        {"signed_parking_radius_residual_m",point.signed_parking_radius_residual_m},
+        {"signed_radial_velocity_mps",point.signed_radial_velocity_mps},
+        {"signed_tangential_speed_residual_mps",point.signed_tangential_speed_residual_mps}});
+    for(const auto& burn:probe.burns)burns.push_back({{"ut_s",burn.ut_s},
+        {"delta_v_mps",vector_json(burn.delta_v_mps)},{"magnitude_mps",burn.delta_v_magnitude_mps}});
+    const auto& radius=probe.mars_stay_radius;
+    json venus=nullptr;
+    if(probe.selected_venus)venus={{"body_id",probe.selected_venus->body_id},
+        {"ut_s",probe.selected_venus->ut_s},{"distance_m",probe.selected_venus->distance_m},
+        {"clearance_m",probe.selected_venus->clearance_m}};
+    return {{"checkpoints",checkpoints},{"burns",burns},{"selected_venus",venus},
+        {"venus_event_count",probe.venus_events.size()},
+        {"minimum_observed_venus_boundary_margin_m",probe.minimum_observed_venus_boundary_margin_m?
+            json(*probe.minimum_observed_venus_boundary_margin_m):json(nullptr)},
+        {"mars_radius",{{"observed_minimum_m",radius.minimum_m},{"observed_minimum_ut_s",radius.minimum_ut_s},
+            {"observed_maximum_m",radius.maximum_m},{"observed_maximum_ut_s",radius.maximum_ut_s},
+            {"model_interval_lower_m",radius.model_interval_lower_m},
+            {"model_interval_upper_m",radius.model_interval_upper_m}}},
+        {"total_charged_delta_v_mps",probe.total_charged_delta_v_mps}};
+}
 void process_evaluation(const json& input,const std::string& id,const WorkerEmit& emit,const WorkerCancel& cancelled,
-    const WorkerAfterRead& after_read){
+    const WorkerAfterRead& after_read,bool shooting=false){
     std::string hash,confidence;bool started=false;
     auto send=[&](json event){event["protocol_version"]=1;event["request_id"]=id;
         if(!hash.empty()){event["snapshot_hash"]=hash;event["source_confidence"]=confidence;}emit(event);};
@@ -330,7 +364,7 @@ void process_evaluation(const json& input,const std::string& id,const WorkerEmit
             "expected_frame_axes","expected_state_epoch_ut_s"};
         for(auto it=source.begin();it!=source.end();++it)
             if(!source_fields.contains(it.key()))throw std::invalid_argument("unsupported evaluation source field: "+it.key());
-        if(source.at("mode")!="runtime_snapshot")throw std::invalid_argument("evaluate_route requires runtime_snapshot");
+        if(source.at("mode")!="runtime_snapshot")throw std::invalid_argument("fixed-route command requires runtime_snapshot");
         const auto path=source.at("path").get<std::string>();
         const auto expected=source.at("expected_snapshot_hash").get<std::string>();
         if(path.empty()||!lower_sha256(expected))throw std::invalid_argument("runtime path and lowercase SHA-256 required");
@@ -353,7 +387,93 @@ void process_evaluation(const json& input,const std::string& id,const WorkerEmit
         try{loaded=read_runtime_snapshot(bytes,expected);}catch(const RuntimeReaderError& issue){error("invalid_source",issue.what());return;}
         hash=loaded.snapshot.snapshot_hash;confidence=loaded.snapshot.confidence;
         const auto request=evaluation_request(input,loaded.snapshot);
+        RouteShootingLimits limits;
+        if(shooting){
+            static const std::unordered_set<std::string> fields={"protocol_version","command","request_id","source","trial","shooting"};
+            for(auto it=input.begin();it!=input.end();++it)
+                if(!fields.contains(it.key()))throw std::invalid_argument("unsupported shooting request field: "+it.key());
+            const auto& settings=input.at("shooting");
+            if(!settings.is_object()||settings.size()!=4)throw std::invalid_argument("shooting limits require four fields");
+            static const std::unordered_set<std::string> allowed={"finite_difference_impulse_mps","max_impulse_mps",
+                "max_iterations","max_probe_evaluations"};
+            for(auto it=settings.begin();it!=settings.end();++it)
+                if(!allowed.contains(it.key()))throw std::invalid_argument("unsupported shooting limit: "+it.key());
+            limits.finite_difference_impulse_mps=required_number(settings,"finite_difference_impulse_mps");
+            limits.max_impulse_mps=required_number(settings,"max_impulse_mps");
+            auto count=[&](const char* key,std::size_t cap){const auto& value=settings.at(key);
+                if(!value.is_number_integer()||value.get<std::int64_t>()<=0||value.get<std::int64_t>()>static_cast<std::int64_t>(cap))
+                    throw std::invalid_argument(std::string("shooting ")+key+" invalid");
+                return static_cast<std::size_t>(value.get<std::int64_t>());};
+            limits.max_iterations=count("max_iterations",1000);
+            limits.max_probe_evaluations=count("max_probe_evaluations",10000);
+            if(limits.finite_difference_impulse_mps<=0||limits.max_impulse_mps<=0)
+                throw std::invalid_argument("shooting impulse limits invalid");
+            for(const auto& impulse:request.impulses_mps)
+                if(!std::isfinite(norm(impulse))||norm(impulse)>limits.max_impulse_mps)
+                    throw std::invalid_argument("shooting seed impulse exceeds cap");
+        }
         if(cancelled()){send({{"type","cancelled"},{"status","before_numerical_work"}});return;}
+        if(shooting){
+            send({{"type","started"},{"source_mode","runtime_snapshot"},
+                {"frame_origin",loaded.snapshot.frame.origin},{"frame_axes",loaded.snapshot.frame.axes},
+                {"frame_handedness",loaded.snapshot.frame.handedness},
+                {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},{"units","SI"},
+                {"result_label","independent_nbody_coarse_trial_diagnostic_only"},
+                {"non_interruptible_stages",json::array({"planetary_ephemeris_integration","single_spacecraft_probe",
+                    "strict_coarse_and_fine_repropagation"})}});
+            started=true;
+            std::size_t last_reported=0;
+            auto progress=[&](std::size_t completed){
+                const auto interval=std::max<std::size_t>(1,(limits.max_probe_evaluations+63)/64);
+                if(completed!=1&&completed!=limits.max_probe_evaluations&&completed-last_reported<interval)return;
+                last_reported=completed;
+                send({{"type","progress"},{"phase","coarse_probes"},
+                    {"completed_probes",completed},{"total_probes",limits.max_probe_evaluations},
+                    {"frame_origin",loaded.snapshot.frame.origin},{"frame_axes",loaded.snapshot.frame.axes},
+                    {"frame_handedness",loaded.snapshot.frame.handedness},
+                    {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},{"units","SI"}});
+            };
+            const auto context=prepare_route_probe_runtime(bytes,expected,request);
+            if(cancelled()){send({{"type","cancelled"},{"status","before_coarse_probe"},
+                {"completed_probes",0}});return;}
+            const RouteProbeTrial seed{request.launch_parking_state,request.impulses_mps,request.checkpoint_targets_relative};
+            const auto shot=shoot_fixed_route(context,seed,limits,cancelled,progress);
+            if(shot.status=="cancelled"||cancelled()){
+                send({{"type","cancelled"},{"status","during_numerical_work"},
+                {"completed_probes",shot.probe_evaluations}});return;
+            }
+            if(shot.probe_evaluations>last_reported)progress(shot.probe_evaluations);
+            json terminal={{"type","complete"},{"status",shot.status},
+                {"completed_probes",shot.probe_evaluations},{"total_probes",limits.max_probe_evaluations},
+                {"iterations",shot.iterations},{"frame_origin",loaded.snapshot.frame.origin},
+                {"frame_axes",loaded.snapshot.frame.axes},{"frame_handedness",loaded.snapshot.frame.handedness},
+                {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},{"units","SI"},
+                {"role_body_ids",{{"central",request.route.home_mars.central_body_id},
+                    {"home",request.route.home_mars.departure_body_id},
+                    {"mars",request.route.home_mars.arrival_body_id},
+                    {"venus",request.route.mars_venus.arrival_body_id}}},
+                {"route_seed_evidence_revalidated",false},{"mars_stay_continuously_verified",false},
+                {"final_trial",shooting_trial_json(shot.final_probe.trial)},
+                {"coarse_diagnostics",shooting_probe_json(shot.final_probe)}};
+            if(shot.status=="checkpointed_accepted"&&shot.strict_result){
+                const auto& strict=*shot.strict_result;
+                terminal["result_label"]="independent_nbody_fixed_impulse_checkpointed_only";
+                terminal["route_seed_evidence_revalidated"]=strict.route_seed_evidence_revalidated;
+                terminal["mars_stay_continuously_verified"]=strict.mars_stay_continuously_verified;
+                terminal["strict"]={{"coarse",evaluation_pass_json(strict.coarse)},
+                    {"fine",evaluation_pass_json(strict.strict)},
+                    {"total_charged_delta_v_mps",strict.total_charged_delta_v_mps},
+                    {"disagreement",{{"maximum_checkpoint_position_m",strict.maximum_checkpoint_position_disagreement_m},
+                        {"maximum_checkpoint_velocity_mps",strict.maximum_checkpoint_velocity_disagreement_mps},
+                        {"venus_event_time_s",strict.venus_event_time_disagreement_s},
+                        {"venus_radius_m",strict.venus_radius_disagreement_m},
+                        {"mars_minimum_radius_m",strict.mars_minimum_radius_disagreement_m},
+                        {"mars_maximum_radius_m",strict.mars_maximum_radius_disagreement_m},
+                        {"mars_minimum_time_s",strict.mars_minimum_time_disagreement_s},
+                        {"mars_maximum_time_s",strict.mars_maximum_time_disagreement_s}}}};
+            }else terminal["result_label"]="independent_nbody_coarse_trial_diagnostic_only";
+            send(std::move(terminal));return;
+        }
         send({{"type","started"},{"source_mode","runtime_snapshot"},{"frame_origin",loaded.snapshot.frame.origin},
             {"frame_axes",loaded.snapshot.frame.axes},{"frame_handedness",loaded.snapshot.frame.handedness},
             {"state_epoch_ut_s",*loaded.snapshot.state_epoch_ut_s},{"units","SI"},
@@ -626,6 +746,8 @@ void process_start_line(const std::string& line,const WorkerEmit& emit,const Wor
         process_mission(input,id,emit,cancelled,after_runtime_bytes_read_for_test);return;}
     if(input["command"]=="evaluate_route"){
         process_evaluation(input,id,emit,cancelled,after_runtime_bytes_read_for_test);return;}
+    if(input["command"]=="shoot_route"){
+        process_evaluation(input,id,emit,cancelled,after_runtime_bytes_read_for_test,true);return;}
     if(input["command"]!="start"){error("invalid_request","unsupported command");return;}
     bool work_started=false;
     try{

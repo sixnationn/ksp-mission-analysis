@@ -2,6 +2,7 @@
 #include "MissionRoute.hpp"
 #include "Spacecraft.hpp"
 #include <array>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -111,7 +112,8 @@ private:
     friend RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot&,const RouteEvaluationRequest&);
     friend RouteProbeContext prepare_route_probe_runtime(const std::string&,const std::string&,const RouteEvaluationRequest&);
     friend RouteProbeResult probe_route_trial(const RouteProbeContext&,const RouteProbeTrial&);
-    friend RouteShootingResult shoot_fixed_route(const RouteProbeContext&,const RouteProbeTrial&,const RouteShootingLimits&);
+    friend RouteShootingResult shoot_fixed_route(const RouteProbeContext&,const RouteProbeTrial&,const RouteShootingLimits&,
+        const std::function<bool()>&,const std::function<void(std::size_t)>&);
 };
 RouteProbeContext prepare_route_probe_synthetic_fixture(const Snapshot& snapshot,const RouteEvaluationRequest& baseline);
 RouteProbeContext prepare_route_probe_runtime(const std::string& runtime_json_bytes,const std::string& expected_sha256,
@@ -128,5 +130,6 @@ struct RouteShootingResult {
     std::size_t iterations=0,probe_evaluations=0;
 };
 RouteShootingResult shoot_fixed_route(const RouteProbeContext& context,const RouteProbeTrial& seed,
-    const RouteShootingLimits& limits);
+    const RouteShootingLimits& limits,const std::function<bool()>& cancelled={},
+    const std::function<void(std::size_t)>& progress={});
 }
