@@ -5,6 +5,7 @@
 #include "EvaluationReport.hpp"
 #include "ShootingWorkflow.hpp"
 #include "ReportReopen.hpp"
+#include "ViewMath.hpp"
 #include <epoxy/gl.h>
 #include <glibmm/ustring.h>
 #include <sigc++/sigc++.h>
@@ -57,17 +58,18 @@ std::string fixed(double value,int digits=2){std::ostringstream out;out<<std::fi
 std::string scientific(double value){std::ostringstream out;out<<std::scientific<<std::setprecision(3)<<value;return out.str();}
 Snapshot synthetic_snapshot(){
     constexpr double mu=3.986004418e14;
-    Snapshot s;s.analysis_ready=true;s.confidence="synthetic_fixture";s.snapshot_hash="synthetic-m5-window-v1";
+    Snapshot s;s.analysis_ready=true;s.confidence="synthetic_fixture";s.snapshot_hash="synthetic-m5-window-v2";
     s.state_epoch_ut_s=0;s.frame={"synthetic barycenter","X right, Y up, Z out","right",true};
     s.bodies.push_back({"Helion",mu,1.0e6,State{{0,0,0},{0,0,0}},0});
-    auto orbit=[&](const std::string& id,double radius,double phase,double body_mu,double body_radius){
-        const double speed=std::sqrt(mu/radius);
-        s.bodies.push_back({id,body_mu,body_radius,State{{radius*std::cos(phase),radius*std::sin(phase),0},
-            {-speed*std::sin(phase),speed*std::cos(phase),0}},0});
+    auto orbit=[&](const std::string& id,double radius,double phase,double inclination_deg,
+                   double node_deg,double body_mu,double body_radius){
+        const auto state=view::circular_orbit(mu,radius,phase,inclination_deg*pi/180,node_deg*pi/180);
+        s.bodies.push_back({id,body_mu,body_radius,state,0});
     };
-    orbit("Haven",1.0e7,0,1,3.1e5);
-    orbit("Ares",1.5e7,1.2,1,2.4e5);
-    orbit("Cyra",7.2e6,-1.0,1,2.1e5);
+    orbit("Haven",1.0e7,0,0,0,1,3.1e5);
+    orbit("Ares",1.5e7,1.2,18,30,1,2.4e5);
+    orbit("Cyra",7.2e6,-1.0,9,-45,1,2.1e5);
+    orbit("Neris",2.0e7,0.7,27,55,1,2.2e5);
     return s;
 }
 Ephemeris synthetic_ephemeris(const Snapshot& snapshot){
@@ -112,22 +114,26 @@ public:
         signal_render().connect(sigc::mem_fun(*this,&OrbitView::render),false);
         signal_unrealize().connect(sigc::mem_fun(*this,&OrbitView::release),false);
         auto orbit_drag=Gtk::GestureDrag::create();orbit_drag->set_button(1);
-        orbit_drag->signal_drag_begin().connect([this](double,double){drag_yaw_=yaw_;drag_pitch_=pitch_;});
-        orbit_drag->signal_drag_update().connect([this](double dx,double dy){yaw_=drag_yaw_+dx*0.006;pitch_=std::clamp(drag_pitch_+dy*0.006,-1.35,1.35);queue_render();});
+        orbit_drag->signal_drag_begin().connect([this](double,double){drag_camera_=camera_;});
+        orbit_drag->signal_drag_update().connect([this](double dx,double dy){
+            camera_.yaw_rad=drag_camera_.yaw_rad+dx*0.004;
+            camera_.tilt_rad=view::drag_tilt(drag_camera_.tilt_rad,dy);queue_render();});
         add_controller(orbit_drag);
         auto pan_drag=Gtk::GestureDrag::create();pan_drag->set_button(3);
-        pan_drag->signal_drag_begin().connect([this](double,double){drag_pan_x_=pan_x_;drag_pan_y_=pan_y_;});
+        pan_drag->signal_drag_begin().connect([this](double,double){drag_camera_=camera_;});
         pan_drag->signal_drag_update().connect([this](double dx,double dy){
-            pan_x_=drag_pan_x_-dx*2.0/get_width();pan_y_=drag_pan_y_+dy*2.0/get_height();queue_render();});
+            camera_.pan_x=drag_camera_.pan_x-dx*2.0/std::max(1,get_width());
+            camera_.pan_y=drag_camera_.pan_y+dy*2.0/std::max(1,get_height());queue_render();});
         add_controller(pan_drag);
         auto scroll=Gtk::EventControllerScroll::create();scroll->set_flags(Gtk::EventControllerScroll::Flags::VERTICAL);
-        scroll->signal_scroll().connect([this](double,double dy){zoom_=std::clamp(zoom_*std::exp(dy*0.12),0.35,5.0);queue_render();return true;},false);
+        scroll->signal_scroll().connect([this](double,double dy){camera_.zoom=std::clamp(camera_.zoom*std::exp(dy*0.12),0.35,5.0);queue_render();return true;},false);
         add_controller(scroll);
         auto click=Gtk::GestureClick::create();click->set_button(1);
         click->signal_pressed().connect([this](int,double x,double y){select_at(x,y);});add_controller(click);
         reload();
     }
     void select(std::size_t index){selected_=index;queue_render();}
+    void top_view(){camera_.yaw_rad=0;camera_.tilt_rad=0;camera_.pan_x=0;camera_.pan_y=0;queue_render();}
     void reload(){
         paths_.clear();selected_=snapshot_.bodies.size()>1?1:0;
         const auto& metadata=ephemeris_.metadata;
@@ -149,17 +155,14 @@ private:
     std::function<void(std::size_t)> selection_;std::function<void(const std::string&)> error_;
     std::vector<std::vector<Vec3>> paths_;
     GLuint program_=0,vao_=0,vbo_=0;GLint mode_uniform_=-1;
-    double yaw_=0.18,pitch_=0.28,zoom_=1,pan_x_=0,pan_y_=0;
+    view::Camera camera_,drag_camera_;
     double scale_=2.4e7;
-    double drag_yaw_=0,drag_pitch_=0,drag_pan_x_=0,drag_pan_y_=0;
     std::size_t selected_=1;
-    std::array<std::array<float,3>,4> colors_{{{{0.96f,0.75f,0.35f}},{{0.28f,0.78f,0.96f}},{{0.97f,0.43f,0.42f}},{{0.64f,0.81f,0.58f}}}};
+    std::array<std::array<float,3>,5> colors_{{{{0.96f,0.75f,0.35f}},{{0.28f,0.78f,0.96f}},{{0.97f,0.43f,0.42f}},{{0.64f,0.81f,0.58f}},{{0.76f,0.61f,0.94f}}}};
     std::array<float,3> project(Vec3 p) const{
         // All subtraction and camera motion use doubles before conversion to GPU floats.
-        const double x=(p.x/scale_-pan_x_)/zoom_,y=(p.y/scale_-pan_y_)/zoom_,z=p.z/scale_/zoom_;
-        const double cy=std::cos(yaw_),sy=std::sin(yaw_),cp=std::cos(pitch_),sp=std::sin(pitch_);
-        const double xr=cy*x-sy*y,yr=sy*x+cy*y;
-        return {static_cast<float>(xr),static_cast<float>(cp*yr-sp*z),static_cast<float>(sp*yr+cp*z)};
+        const auto pixel=view::project(p,scale_,camera_,get_width(),get_height());
+        return {static_cast<float>(pixel.x),static_cast<float>(pixel.y),static_cast<float>(pixel.z)};
     }
     static GLuint shader(GLenum type,const char* source){
         GLuint handle=glCreateShader(type);glShaderSource(handle,1,&source,nullptr);glCompileShader(handle);
@@ -268,7 +271,7 @@ private:
     std::string shooting_stages_;
     std::size_t request_sequence_=0;
     bool pending_close_=false,terminal_seen_=false,active_evaluation_=false,active_shooting_=false;
-    std::string source_details_="Synthetic M2 fixture · no KSP or Principia runtime import";
+    std::string source_details_="Synthetic M2 fixture · five bodies with 0°, 9°, 18° and 27° orbit tilts · no KSP or Principia runtime import";
     bool runtime_loaded_=false;
     void show_import_error(const std::string& detail){
         const std::string message="Import rejected: "+detail+". Retained previous "+(runtime_loaded_?std::string("runtime"):std::string("synthetic"))+" scene.";
@@ -328,6 +331,8 @@ private:
             button->signal_clicked().connect([this,i]{select(i);});body_rows_.append(*button);
         }
         while(auto* child=fields_.get_first_child())fields_.remove(*child);
+        append_field(fields_,"SYSTEM MODEL",std::to_string(snapshot_.bodies.size())+
+            " bodies shown and integrated; route roles select stops only");
         const auto synthetic_role=[this](std::size_t index){return index<snapshot_.bodies.size()?snapshot_.bodies[index].id+" · synthetic":std::string("Unassigned");};
         const auto suggested_role=[this](const std::string& id){
             const auto found=std::find_if(snapshot_.bodies.begin(),snapshot_.bodies.end(),[&](const Body& body){return body.id==id;});
@@ -384,8 +389,14 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         auto* head=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,3);head->add_css_class("scene-head");
         scene_time_.set_xalign(0);scene_time_.add_css_class("eyebrow");head->append(scene_time_);
         selection_.set_xalign(0);head->append(selection_);center_.append(*head);center_.append(view_);
-        auto* controls=label("Drag: orbit camera   ·   Right drag: pan   ·   Wheel: zoom   ·   Click marker: select", "small");
-        controls->set_margin(10);center_.append(*controls);
+        auto* controls=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL,12);
+        controls->set_margin(10);
+        auto* hint=label("Drag up: overhead   ·   Drag down: edge-on   ·   Right drag: pan   ·   Wheel: zoom   ·   Click marker: select","small");
+        hint->set_hexpand(true);controls->append(*hint);
+        auto* overhead=Gtk::make_managed<Gtk::Button>("Top view");
+        overhead->add_css_class("body-button");
+        overhead->signal_clicked().connect([this]{view_.top_view();});controls->append(*overhead);
+        center_.append(*controls);
     }
     void build_right(){
         right_.add_css_class("side");right_.add_css_class("right-side");right_.set_size_request(355,-1);main_.append(right_);

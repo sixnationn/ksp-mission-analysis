@@ -44,6 +44,30 @@ If you already have a `snapshot-...json` from this exporter, skip to step 3.
    ./ksp_desktop --snapshot "$snapshot" --sha256 "$hash"
    ```
 
+### If that KSP instance runs through Steam Proton
+
+Find the **game folder Steam actually launches**. For the Steam installation,
+use KSP's **Manage → Browse local files** command; for another Proton shortcut,
+check that shortcut's target. You want the folder containing `KSP_x64.exe`,
+`GameData/` and `KSP_x64_Data/`. If you have several KSP copies, use a
+disposable copy launched by the same shortcut for this test.
+
+Put the exporter DLL in **that copy's** `GameData/KspMission/Plugins/`, launch
+it through your usual Proton shortcut and press the hotkey in a loaded flight.
+The JSON appears in **that copy's** `PluginData/KspMission/`. Open the JSON
+with the native Linux `ksp_desktop` using its normal Linux path in step 3.
+Do not look for the exporter or JSON inside Proton's `compatdata/.../pfx`:
+that is the Wine prefix, while this exporter writes under KSP's game folder.
+[Valve's Proton FAQ](https://github.com/ValveSoftware/Proton/wiki/Proton-FAQ)
+explains the separate prefix location.
+
+This exporter currently requires the loaded JNSQ and JNSQ Reborn files at
+`GameData/JNSQ/Version/JNSQ.version` and
+`GameData/JNSQ-Reborn/JNSQReborn-Configuration.cfg`. A different modded
+Principia system cannot yet use this runtime capture path; the synthetic
+viewer still works without KSP. If capture fails, keep that instance's
+`KSP.log` and the on-screen error.
+
 The window should say **“Runtime JSON accepted”** and show the imported
 source and bodies. The hash is calculated from the exact file, so do not edit
 the JSON between the second and third commands. If the app says **“Import
