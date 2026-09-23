@@ -1,4 +1,5 @@
 #include "WorkerClient.hpp"
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -123,6 +124,119 @@ void check_ranked(const json& value,std::size_t max_candidates,const std::string
         previous=score;
     }
 }
+double nonnegative_field(const json& value,const char* key){
+    const double number=finite_field(value,key);
+    if(number<0)throw WorkerClientError(std::string(key)+" negative");
+    return number;
+}
+double vector_norm(const json& value,const char* key){
+    if(!value.is_object()||!value.contains(key)||!value.at(key).is_array()||value.at(key).size()!=3)
+        throw WorkerClientError(std::string(key)+" SI vector invalid");
+    double squared=0;
+    for(const auto& coordinate:value.at(key)){
+        if(!coordinate.is_number())throw WorkerClientError(std::string(key)+" SI vector invalid");
+        const double x=coordinate.get<double>();
+        if(!std::isfinite(x))throw WorkerClientError(std::string(key)+" SI vector nonfinite");
+        squared+=x*x;
+    }
+    if(!std::isfinite(squared))throw WorkerClientError(std::string(key)+" SI vector overflow");
+    return std::sqrt(squared);
+}
+struct EvaluatedPass {std::array<double,4> burn_ut{};double burn_total=0;};
+EvaluatedPass check_evaluation_pass(const json& value,const std::string& venus_id){
+    if(!value.is_object())throw WorkerClientError("evaluation pass invalid");
+    if(!value.contains("burns")||!value.contains("checkpoints"))
+        throw WorkerClientError("evaluation burns or checkpoints missing");
+    const auto& burns=value.at("burns"),&checkpoints=value.at("checkpoints");
+    if(!burns.is_array()||burns.size()!=4||!checkpoints.is_array()||checkpoints.size()!=4)
+        throw WorkerClientError("evaluation four burns and checkpoints required");
+    EvaluatedPass pass;
+    constexpr const char* names[]={"launch","Mars capture","Mars pre-departure","home return capture"};
+    for(std::size_t i=0;i<4;++i){
+        const auto& burn=burns.at(i),&checkpoint=checkpoints.at(i);
+        const double ut=finite_field(burn,"ut_s"),magnitude=nonnegative_field(burn,"magnitude_mps");
+        const double norm=vector_norm(burn,"delta_v_mps");
+        if(i&&ut<=pass.burn_ut[i-1])throw WorkerClientError("evaluation burn order invalid");
+        if(std::abs(norm-magnitude)>std::max(1e-8,magnitude*1e-9))
+            throw WorkerClientError("evaluation burn magnitude mismatch");
+        pass.burn_ut[i]=ut;pass.burn_total+=magnitude;
+        if(text_field(checkpoint,"name")!=names[i]||finite_field(checkpoint,"ut_s")!=ut)
+            throw WorkerClientError("evaluation checkpoint order or burn epoch invalid");
+        for(const char* key:{"position_error_m","velocity_error_mps","parking_radius_error_m",
+            "radial_velocity_mps","tangential_speed_error_mps"})nonnegative_field(checkpoint,key);
+    }
+    if(pass.burn_ut[2]-pass.burn_ut[1]!=5184000.0)
+        throw WorkerClientError("evaluation Mars fixed stay invalid");
+    const auto& venus=object_field(value,"venus");
+    if(text_field(venus,"body_id")!=venus_id)throw WorkerClientError("evaluation Venus body ID mismatch");
+    const double venus_ut=finite_field(venus,"ut_s"),distance=finite_field(venus,"distance_m");
+    const double clearance=finite_field(venus,"clearance_m");
+    const double safety=finite_field(venus,"safety_margin_m");
+    if(venus_ut<=pass.burn_ut[2]||venus_ut>=pass.burn_ut[3]||distance<=0||clearance<=0||
+       safety<=0||safety>clearance)
+        throw WorkerClientError("evaluation Venus event or safety margin invalid");
+    const auto& mars=object_field(value,"mars_radius");
+    const double low=finite_field(mars,"observed_minimum_m"),high=finite_field(mars,"observed_maximum_m");
+    const double interval_low=finite_field(mars,"model_interval_lower_m");
+    const double interval_high=finite_field(mars,"model_interval_upper_m");
+    const double low_ut=finite_field(mars,"observed_minimum_ut_s");
+    const double high_ut=finite_field(mars,"observed_maximum_ut_s");
+    if(low<=0||high<low||interval_low<=0||interval_low>low||interval_high<high||
+       low_ut<pass.burn_ut[1]||low_ut>pass.burn_ut[2]||
+       high_ut<pass.burn_ut[1]||high_ut>pass.burn_ut[2]||count(mars,"endpoint_count")!=2)
+        throw WorkerClientError("evaluation Mars radius diagnostic invalid");
+    (void)count(mars,"root_count");(void)count(value,"accepted_steps");(void)count(value,"rejected_steps");
+    return pass;
+}
+void check_evaluation_complete(const json& event,const std::string& origin,const std::string& axes,
+    const std::string& handedness,double epoch){
+    if(event.contains("ranked_candidates")||event.contains("ranked_routes")||
+       event.contains("candidate")||event.contains("route")||event.contains("refinement"))
+        throw WorkerClientError("evaluation screened payload invalid for result kind");
+    if(text_field(event,"result_label")!="independent_nbody_fixed_impulse_checkpointed_only"||
+       text_field(event,"units")!="SI"||text_field(event,"force_model")!="newtonian_point_mass"||
+       text_field(event,"frame_origin")!=origin||text_field(event,"frame_axes")!=axes||
+       text_field(event,"frame_handedness")!=handedness||finite_field(event,"state_epoch_ut_s")!=epoch)
+        throw WorkerClientError("evaluation frame, epoch, units, force model or label mismatch");
+    if(!event.contains("route_seed_evidence_revalidated")||
+       event.at("route_seed_evidence_revalidated")!=false||
+       !event.contains("mars_stay_continuously_verified")||
+       event.at("mars_stay_continuously_verified")!=false)
+        throw WorkerClientError("evaluation evidence flags invalid");
+    const auto& roles=object_field(event,"role_body_ids");
+    for(const char* key:{"central","home","mars","venus"})
+        if(!roles.contains(key)||!roles.at(key).is_string())
+            throw WorkerClientError("evaluation role body IDs invalid");
+    const auto central=text_field(roles,"central"),home=text_field(roles,"home");
+    const auto mars=text_field(roles,"mars"),venus=text_field(roles,"venus");
+    if(central.empty()||home.empty()||mars.empty()||venus.empty()||
+       std::set<std::string>{central,home,mars,venus}.size()!=4)
+        throw WorkerClientError("evaluation role body IDs invalid");
+    const auto coarse=check_evaluation_pass(object_field(event,"coarse"),venus);
+    const auto strict=check_evaluation_pass(object_field(event,"strict"),venus);
+    if(coarse.burn_ut!=strict.burn_ut)throw WorkerClientError("evaluation coarse/strict burn epochs differ");
+    const auto& coarse_burns=event.at("coarse").at("burns");
+    const auto& strict_burns=event.at("strict").at("burns");
+    for(std::size_t i=0;i<4;++i){
+        for(std::size_t axis=0;axis<3;++axis){
+            const double a=coarse_burns.at(i).at("delta_v_mps").at(axis).get<double>();
+            const double b=strict_burns.at(i).at("delta_v_mps").at(axis).get<double>();
+            if(std::abs(a-b)>std::max(1e-9,std::max(std::abs(a),std::abs(b))*1e-9))
+                throw WorkerClientError("evaluation coarse/strict same impulse mismatch");
+        }
+        const double a=finite_field(coarse_burns.at(i),"magnitude_mps");
+        const double b=finite_field(strict_burns.at(i),"magnitude_mps");
+        if(std::abs(a-b)>std::max(1e-9,std::max(a,b)*1e-9))
+            throw WorkerClientError("evaluation coarse/strict same impulse magnitude mismatch");
+    }
+    const double total=nonnegative_field(event,"total_charged_delta_v_mps");
+    if(std::abs(total-coarse.burn_total)>std::max(1e-8,total*1e-9))
+        throw WorkerClientError("evaluation charged burn total mismatch");
+    const auto& disagreement=object_field(event,"disagreement");
+    for(const char* key:{"maximum_checkpoint_position_m","maximum_checkpoint_velocity_mps",
+        "venus_event_time_s","venus_radius_m","mars_minimum_radius_m","mars_maximum_radius_m",
+        "mars_minimum_time_s","mars_maximum_time_s"})nonnegative_field(disagreement,key);
+}
 #ifdef _WIN32
 std::wstring wide(const std::string& utf8){
     if(utf8.empty())return {};
@@ -221,7 +335,9 @@ json WorkerEventValidator::accept_line(const std::string& line){
        type!="complete"&&type!="cancelled"&&type!="error")
         throw WorkerClientError("event type unsupported");
     if((result_kind_==WorkerResultKind::screened_seed&&type=="route")||
-       (result_kind_==WorkerResultKind::screened_route&&(type=="candidate"||type=="refinement")))
+       (result_kind_==WorkerResultKind::screened_route&&(type=="candidate"||type=="refinement"))||
+       (result_kind_==WorkerResultKind::fixed_impulse_evaluation&&
+        (type=="candidate"||type=="route"||type=="refinement")))
         throw WorkerClientError("event type invalid for result kind");
     if(terminal_)throw WorkerClientError("event after terminal");
     const bool identity_present=event.contains("snapshot_hash")||event.contains("source_confidence");
@@ -231,20 +347,58 @@ json WorkerEventValidator::accept_line(const std::string& line){
     }
     if(type=="started"){
         if(started_)throw WorkerClientError("duplicate started event");
-        total_cells_=count(event,"total_cells");
-        if(total_cells_==0||total_cells_>(result_kind_==WorkerResultKind::screened_route?100000:1000000))
-            throw WorkerClientError("total_cells invalid");
+        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+            if(source_confidence_!="runtime_observed_uncompared"||
+               text_field(event,"source_mode")!="runtime_snapshot"||text_field(event,"units")!="SI"||
+               text_field(event,"result_label")!="independent_nbody_fixed_impulse_checkpointed_only"||
+               event.contains("total_cells"))
+                throw WorkerClientError("evaluation source, units or label invalid");
+            frame_origin_=text_field(event,"frame_origin");frame_axes_=text_field(event,"frame_axes");
+            frame_handedness_=text_field(event,"frame_handedness");
+            state_epoch_ut_s_=finite_field(event,"state_epoch_ut_s");
+            if(frame_origin_!="system_barycenter"||frame_axes_!="principia_alicesun_frozen_at_capture"||
+               frame_handedness_!="right")throw WorkerClientError("evaluation inertial frame invalid");
+        }else{
+            total_cells_=count(event,"total_cells");
+            if(total_cells_==0||total_cells_>(result_kind_==WorkerResultKind::screened_route?100000:1000000))
+                throw WorkerClientError("total_cells invalid");
+        }
         started_=true;
-    }else if(type!="error"&&!started_)throw WorkerClientError("event before started");
+    }else if(type!="error"&&!(result_kind_==WorkerResultKind::fixed_impulse_evaluation&&type=="cancelled")&&
+             !started_)throw WorkerClientError("event before started");
     if(type=="progress"){
-        const auto sampled=count(event,"sampled_cells"),total=count(event,"total_cells");
-        if(total!=total_cells_||sampled<last_sampled_||sampled>total_cells_)throw WorkerClientError("progress regression or bound");
-        last_sampled_=sampled;
+        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+            const auto completed=count(event,"completed_phases"),total=count(event,"total_phases");
+            if(text_field(event,"phase")!="fixed_impulse_evaluation"||total!=1||
+               completed<last_completed_phases_||completed>1||
+               (!saw_evaluation_phase_zero_&&completed!=0)||
+               event.contains("sampled_cells")||event.contains("total_cells"))
+                throw WorkerClientError("evaluation progress regression or bound");
+            if(completed==0)saw_evaluation_phase_zero_=true;
+            last_completed_phases_=completed;
+        }else{
+            const auto sampled=count(event,"sampled_cells"),total=count(event,"total_cells");
+            if(total!=total_cells_||sampled<last_sampled_||sampled>total_cells_)
+                throw WorkerClientError("progress regression or bound");
+            last_sampled_=sampled;
+        }
     }
     if(type=="candidate"&&text_field(event,"status")!="screened_seed")throw WorkerClientError("candidate status invalid");
     if(type=="route")check_route(event,snapshot_hash_,source_confidence_);
     if(type=="complete"||type=="cancelled"){
-        if(result_kind_==WorkerResultKind::screened_route)
+        if(result_kind_==WorkerResultKind::fixed_impulse_evaluation){
+            if(type=="cancelled"){
+                const auto status=text_field(event,"status");
+                if((status!="before_numerical_work"&&status!="after_numerical_work")||
+                   (!started_&&status!="before_numerical_work"))
+                    throw WorkerClientError("evaluation cancellation status invalid");
+            }
+            if(type=="complete"){
+                check_evaluation_complete(event,frame_origin_,frame_axes_,frame_handedness_,state_epoch_ut_s_);
+                if(!saw_evaluation_phase_zero_||last_completed_phases_!=1)
+                    throw WorkerClientError("evaluation progress incomplete before complete");
+            }
+        }else if(result_kind_==WorkerResultKind::screened_route)
             check_ranked_routes(event,max_candidates_,snapshot_hash_,source_confidence_);
         else check_ranked(event,max_candidates_,snapshot_hash_,source_confidence_);
     }

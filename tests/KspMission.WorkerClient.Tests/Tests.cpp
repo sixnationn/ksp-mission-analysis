@@ -10,7 +10,10 @@ using json=nlohmann::json;
 namespace {
 int checks=0;
 void check(bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(why);}
-template<class F> void rejects(F action,const char* fragment){try{action();}catch(const WorkerClientError& e){check(std::string(e.what()).find(fragment)!=std::string::npos,"wrong validation diagnostic");return;}throw std::runtime_error(fragment);}
+template<class F> void rejects(F action,const char* fragment){try{action();}catch(const WorkerClientError& e){
+ if(std::string(e.what()).find(fragment)==std::string::npos)
+  throw std::runtime_error(std::string("wrong validation diagnostic: ")+e.what());
+ ++checks;return;}throw std::runtime_error(fragment);}
 std::string request(){return json{{"protocol_version",1},{"command","start"},{"request_id","client-test"},
  {"source",{{"mode","synthetic_fixture"},{"expected_snapshot_hash","synthetic-worker-v1"}}},
  {"grid",{{"central_body_id","star"},{"departure_body_id","home"},{"arrival_body_id","target"},
@@ -71,6 +74,138 @@ void mission_validator_cases(){
  WorkerEventValidator wrong_mode("client-test","synthetic-worker-v1","synthetic_fixture",5);
  wrong_mode.accept_line(started.dump());rejects([&]{wrong_mode.accept_line(route.dump());},"event type");
 }
+json evaluation_event(const std::string& type){
+ json e={{"protocol_version",1},{"request_id","evaluation-client-test"},{"type",type},
+  {"snapshot_hash",std::string(64,'a')},{"source_confidence","runtime_observed_uncompared"}};
+ if(type=="started"){
+  e.update(json{{"source_mode","runtime_snapshot"},{"frame_origin","system_barycenter"},
+   {"frame_axes","principia_alicesun_frozen_at_capture"},{"frame_handedness","right"},
+   {"state_epoch_ut_s",0.0},{"units","SI"},
+   {"result_label","independent_nbody_fixed_impulse_checkpointed_only"}});
+ }
+ if(type=="progress")e.update(json{{"phase","fixed_impulse_evaluation"},
+   {"completed_phases",0},{"total_phases",1}});
+ if(type=="complete"){
+  json burns=json::array(),checkpoints=json::array();
+  const double epochs[4]={0,1000,5185000,5187000};
+  const char* names[4]={"launch","Mars capture","Mars pre-departure","home return capture"};
+  for(int i=0;i<4;++i){burns.push_back({{"ut_s",epochs[i]},{"delta_v_mps",{1,0,0}},
+      {"magnitude_mps",1.0}});
+   checkpoints.push_back({{"name",names[i]},{"ut_s",epochs[i]},
+      {"position_error_m",0.0},{"velocity_error_mps",0.0},
+      {"parking_radius_error_m",0.0},{"radial_velocity_mps",0.0},
+      {"tangential_speed_error_mps",0.0}});}
+  json pass={{"burns",burns},{"checkpoints",checkpoints},{"accepted_steps",100},
+   {"rejected_steps",0},{"venus",{{"body_id","venus"},{"ut_s",5186000.0},
+      {"distance_m",1000000.0},{"clearance_m",900000.0},{"safety_margin_m",1000.0}}},
+   {"mars_radius",{{"observed_minimum_m",200000.0},{"observed_minimum_ut_s",1000.0},
+      {"observed_maximum_m",210000.0},{"observed_maximum_ut_s",5185000.0},
+      {"model_interval_lower_m",190000.0},{"model_interval_upper_m",220000.0},
+      {"endpoint_count",2},{"root_count",1}}}};
+  e.update(json{{"result_label","independent_nbody_fixed_impulse_checkpointed_only"},
+   {"role_body_ids",{{"central","sun"},{"home","home"},{"mars","mars"},{"venus","venus"}}},
+   {"route_seed_evidence_revalidated",false},{"mars_stay_continuously_verified",false},
+   {"frame_origin","system_barycenter"},{"frame_axes","principia_alicesun_frozen_at_capture"},
+   {"frame_handedness","right"},{"state_epoch_ut_s",0.0},{"units","SI"},
+   {"force_model","newtonian_point_mass"},{"coarse",pass},{"strict",pass},
+   {"total_charged_delta_v_mps",4.0},
+   {"disagreement",{{"maximum_checkpoint_position_m",0.0},
+      {"maximum_checkpoint_velocity_mps",0.0},{"venus_event_time_s",0.0},
+      {"venus_radius_m",0.0},{"mars_minimum_radius_m",0.0},
+      {"mars_maximum_radius_m",0.0},{"mars_minimum_time_s",0.0},
+      {"mars_maximum_time_s",0.0}}}});
+ }
+ return e;
+}
+void evaluation_validator_cases(){
+ auto create=[](){return WorkerEventValidator("evaluation-client-test",std::string(64,'a'),
+   "runtime_observed_uncompared",4,WorkerResultKind::fixed_impulse_evaluation);};
+ auto v=create();v.accept_line(evaluation_event("started").dump());
+ v.accept_line(evaluation_event("progress").dump());
+ auto finished_phase=evaluation_event("progress");finished_phase["completed_phases"]=1;
+ v.accept_line(finished_phase.dump());
+ auto done=evaluation_event("complete");v.accept_line(done.dump());check(v.terminal(),"evaluation terminal accepted");
+ rejects([&]{v.accept_line(done.dump());},"after terminal");
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());
+   x.accept_line(done.dump());},"progress");
+ auto bad=evaluation_event("started");bad["units"]="km";
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"units");
+ bad=evaluation_event("started");bad["snapshot_hash"]="other";
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"snapshot_hash");
+ bad=evaluation_event("complete");bad["role_body_ids"].erase("mars");
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"role");
+ bad=evaluation_event("complete");bad["coarse"]["burns"][1]["ut_s"]=999;
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"burn");
+ bad=evaluation_event("complete");bad["coarse"]["venus"]["body_id"]="other";
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"Venus");
+ bad=evaluation_event("complete");bad["route_seed_evidence_revalidated"]=true;
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"evidence");
+ auto reject_complete=[&](json altered,const char* fragment){rejects([&]{auto x=create();
+   x.accept_line(evaluation_event("started").dump());x.accept_line(altered.dump());},fragment);};
+ bad=evaluation_event("started");bad["frame_axes"]="wrong";
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"frame");
+ bad=evaluation_event("complete");bad["state_epoch_ut_s"]=1;reject_complete(bad,"epoch");
+ bad=evaluation_event("complete");bad["force_model"]="other";reject_complete(bad,"force model");
+ bad=evaluation_event("complete");bad["result_label"]="independent_nbody_route_evaluated";
+ reject_complete(bad,"label");
+ bad=evaluation_event("complete");bad["units"]="km";reject_complete(bad,"units");
+ bad=evaluation_event("complete");bad["mars_stay_continuously_verified"]=true;
+ reject_complete(bad,"evidence");
+ bad=evaluation_event("complete");bad["coarse"]["burns"].erase(3);reject_complete(bad,"four burns");
+ bad=evaluation_event("complete");bad["coarse"]["burns"][0]["magnitude_mps"]=2;
+ reject_complete(bad,"burn magnitude");
+ bad=evaluation_event("complete");bad["total_charged_delta_v_mps"]=5;
+ reject_complete(bad,"burn total");
+ bad=evaluation_event("complete");bad["coarse"]["checkpoints"][1]["name"]="home return capture";
+ reject_complete(bad,"checkpoint");
+ bad=evaluation_event("complete");bad["strict"]["burns"][2]["ut_s"]=5185001;
+ reject_complete(bad,"checkpoint");
+ bad=evaluation_event("complete");bad["strict"]["burns"][2]["delta_v_mps"]={2,0,0};
+ bad["strict"]["burns"][2]["magnitude_mps"]=2;
+ reject_complete(bad,"same impulse");
+ bad=evaluation_event("complete");bad["coarse"]["venus"]["safety_margin_m"]=0;
+ reject_complete(bad,"Venus");
+ bad=evaluation_event("complete");bad["coarse"]["checkpoints"][0]["position_error_m"]=-1;
+ reject_complete(bad,"negative");
+ bad=evaluation_event("complete");bad["strict"]["mars_radius"]["observed_maximum_m"]=100000;
+ reject_complete(bad,"Mars radius");
+ bad=evaluation_event("complete");bad["disagreement"]["venus_radius_m"]=-1;
+ reject_complete(bad,"negative");
+ bad=evaluation_event("complete");bad["coarse"]["mars_radius"]["observed_minimum_m"]=nullptr;
+ reject_complete(bad,"observed_minimum_m");
+ bad=evaluation_event("complete");bad["disagreement"]["venus_radius_m"]=nullptr;
+ reject_complete(bad,"venus_radius_m");
+ bad=evaluation_event("complete");bad["ranked_routes"]=json::array();
+ reject_complete(bad,"result kind");
+ bad=evaluation_event("complete");bad.erase("coarse");reject_complete(bad,"coarse");
+ bad=evaluation_event("complete");bad["coarse"].erase("burns");
+ reject_complete(bad,"burns");
+ bad=evaluation_event("started");bad["source_confidence"]="synthetic_fixture";
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"source confidence");
+ bad=evaluation_event("progress");bad["completed_phases"]=1;
+ auto progress_validator=create();progress_validator.accept_line(evaluation_event("started").dump());
+ progress_validator.accept_line(evaluation_event("progress").dump());
+ progress_validator.accept_line(bad.dump());bad["completed_phases"]=0;
+ rejects([&]{progress_validator.accept_line(bad.dump());},"progress regression");
+ bad=evaluation_event("progress");bad["sampled_cells"]=1;
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"progress");
+ bad=evaluation_event("candidate");
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"result kind");
+ bad=evaluation_event("route");
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"result kind");
+ bad=evaluation_event("refinement");
+ rejects([&]{auto x=create();x.accept_line(evaluation_event("started").dump());x.accept_line(bad.dump());},"result kind");
+ auto cancelled=create();auto cancel_event=evaluation_event("cancelled");
+ cancel_event["status"]="before_numerical_work";cancelled.accept_line(cancel_event.dump());
+ check(cancelled.terminal(),"source-bound pre-start evaluation cancellation accepted");
+ bad=evaluation_event("cancelled");
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"status");
+ bad["status"]="after_numerical_work";
+ rejects([&]{auto x=create();x.accept_line(bad.dump());},"status");
+ auto source_error=create();json early={{"protocol_version",1},{"request_id","evaluation-client-test"},
+   {"type","error"},{"code","source_read_failed"},{"detail","missing"}};
+ source_error.accept_line(early.dump());check(source_error.terminal(),"pre-source error accepted");
+}
 ClientOptions options(const std::string& path,const std::string& mode){ClientOptions x;x.executable_path=path;x.arguments={mode};
  x.request_line=request();x.request_id="client-test";x.expected_snapshot_hash="synthetic-worker-v1";
  x.expected_source_confidence="synthetic_fixture";x.timeout=std::chrono::milliseconds(5000);
@@ -99,6 +234,26 @@ void process_cases(const std::string& fake){WorkerClient c;auto x=options(fake,"
  check(!cancelled.empty()&&cancelled.back().value("type",std::string{})=="cancelled","versioned cancellation acknowledged");
  x=options(fake,"valid");check(c.start(x),"restart after reap");auto events=finish(c);
  check(!events.empty()&&events.back()["type"]=="complete","valid fake completion");}
+void evaluation_process_cases(const std::string& fake){
+ WorkerClient client;auto x=options(fake,"evaluation_valid");
+ x.request_id="evaluation-client-test";x.expected_snapshot_hash=std::string(64,'a');
+ x.expected_source_confidence="runtime_observed_uncompared";
+ x.result_kind=WorkerResultKind::fixed_impulse_evaluation;
+ x.request_line=json{{"protocol_version",1},{"command","evaluate_route"},
+  {"request_id",x.request_id}}.dump();
+ check(client.start(x),"evaluation fake starts without blocking caller");
+ const auto valid=finish(client);
+ check(valid.size()==4&&valid.front()["type"]=="started"&&valid.back()["type"]=="complete",
+  "evaluation fake process round-trip");
+ x.arguments={"evaluation_wrong_venus"};check(client.start(x),"evaluation invalid fake starts");
+ check(error(finish(client),"invalid_event"),"evaluation malformed child event rejected");
+ x.arguments={"evaluation_eof"};check(client.start(x),"evaluation EOF fake starts");
+ check(error(finish(client),"premature_eof"),"evaluation premature EOF bounded and reaped");
+ x.arguments={"evaluation_cancelled"};check(client.start(x),"evaluation cancel fake starts");
+ const auto cancelled=finish(client);
+ check(cancelled.size()==1&&cancelled.back()["type"]=="cancelled",
+  "evaluation source-bound pre-start cancellation terminal");
+}
 void blocked_write_cases(const std::string& fake){
  auto x=options(fake,"never_read");x.request_line=std::string(1024*1024-128,'x');
  x.timeout=std::chrono::milliseconds(350);x.cancel_grace=std::chrono::milliseconds(100);
@@ -150,5 +305,5 @@ void real_mission_case(const std::string& worker){
  ++checks;
 }
 }
-int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();mission_validator_cases();process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);real_mission_case(argv[1]);
+int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("paths required");validator_cases();mission_validator_cases();evaluation_validator_cases();process_cases(argv[2]);evaluation_process_cases(argv[2]);blocked_write_cases(argv[2]);real_case(argv[1]);real_mission_case(argv[1]);
  std::cout<<"PASS "<<checks<<" worker client checks\n";}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
