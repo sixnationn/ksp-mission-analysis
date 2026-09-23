@@ -6,4 +6,4 @@ The observable pre-implementation failure was that a valid evaluation `started` 
 
 Local evidence: the focused MSYS2 UCRT64 executable passed **112 worker-client checks**; the focused MSVC Debug CTest passed **1/1**; the full MSYS2 UCRT64 CTest suite passed **12/12**. The fake worker verifies process and protocol behavior without a GTK window. The terminal payload is synthetic runtime-shaped data: these checks do not establish JNSQ/Principia state agreement, physical feasibility, continuous Mars parking, or rendered UI behavior. The GTK study form does not yet issue `evaluate_route` requests.
 
-Ubuntu and Windows CI evidence: pending for this source-bearing commit.
+All six Ubuntu and Windows jobs passed for source-bearing commit `aee20ea` in [CI run 35806224328](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35806224328).

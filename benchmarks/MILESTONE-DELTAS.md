@@ -131,3 +131,14 @@ The `milestones/m4-evaluator-worker.json` checkpoint was captured at 00:35:16 UT
 | gpt-6-sol | high | 2,048,494 | 2,003,840 | 44,654 | 6,818 | 4,037 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or the account's weekly usage. The active coordinator response enters at the next refresh.
+
+## Fixed-impulse worker to headless client checkpoint
+
+The `milestones/m5-evaluator-client.json` checkpoint was captured at 01:29:40 UTC on 23 September 2026, against `milestones/m5-evaluator-client-start.json` from 01:14:05. This interval includes the event contract, client implementation, fake-process regression tests, local and Ubuntu/Windows CI validation, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 5,894,706 | 5,819,264 | 75,442 | 9,480 | 3,956 |
+| gpt-6-sol | medium | 9,205,439 | 9,161,600 | 43,839 | 18,364 | 4,197 |
+
+Sol High, Astra and Luna recorded no new tokens in this interval. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or the account's weekly usage. The active coordinator response enters on the next refresh.
