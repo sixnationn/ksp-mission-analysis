@@ -154,3 +154,15 @@ The `milestones/m5-evaluation-report.json` checkpoint was captured at 01:54:12 U
 | gpt-6-sol | high | 3,302,698 | 3,268,736 | 33,962 | 7,550 | 4,024 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Persisted ephemeris cache checkpoint
+
+The `milestones/m2-persistent-cache.json` checkpoint was captured at 02:30:06 UTC on 23 September 2026, against `milestones/m2-persistent-cache-start.json` from 02:15:06. This interval includes the prewritten cache contract, implementation, focused and local full tests, numerical/import review, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 5,513,749 | 5,372,544 | 141,205 | 16,146 | 7,262 |
+| gpt-6-sol | medium | 3,930,585 | 3,887,104 | 43,481 | 14,045 | 2,774 |
+| gpt-6-sol | high | 3,080,350 | 3,050,112 | 30,238 | 6,435 | 4,281 |
+
+Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
