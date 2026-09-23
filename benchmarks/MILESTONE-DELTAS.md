@@ -142,3 +142,15 @@ The `milestones/m5-evaluator-client.json` checkpoint was captured at 01:29:40 UT
 | gpt-6-sol | medium | 9,205,439 | 9,161,600 | 43,839 | 18,364 | 4,197 |
 
 Sol High, Astra and Luna recorded no new tokens in this interval. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or the account's weekly usage. The active coordinator response enters on the next refresh.
+
+## Headless client to self-contained evaluation report and GTK trial
+
+The `milestones/m5-evaluation-report.json` checkpoint was captured at 01:54:12 UTC on 23 September 2026, against `milestones/m5-evaluation-report-start.json` from 01:32:03. This interval includes the report and UI contracts, implementation, provenance review and fixes, local worker/report/GTK checks, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 16,302,569 | 16,210,560 | 92,009 | 29,746 | 11,820 |
+| gpt-6-sol | medium | 5,079,423 | 5,009,280 | 70,143 | 25,864 | 3,194 |
+| gpt-6-sol | high | 3,302,698 | 3,268,736 | 33,962 | 7,550 | 4,024 |
+
+Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.

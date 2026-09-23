@@ -8,4 +8,4 @@ The GTK form now accepts a user-supplied fixed-impulse trial JSON file and sends
 
 Local evidence: MSYS2 UCRT64 built the GTK desktop and worker with no new dependencies; all **13/13** CTest targets passed. MSVC Debug focused worker/report CTest passed **2/2**, including the worker-produced report composition. The separate report tests use manufactured protocol data, and the worker positive uses a manufactured runtime-shaped system. No GTK window, installed KSP runtime, or Principia comparison was opened or claimed. Rendered review, actual runtime source capture, continuous Mars parking, full route optimization, native packages and benchmark UI responsiveness remain open.
 
-Ubuntu and Windows CI evidence: pending for this source-bearing commit.
+All six Ubuntu and Windows jobs passed for source-bearing commit `f892d31` in [CI run 35807845723](https://github.com/sixnationn/ksp-mission-analysis/actions/runs/35807845723).
