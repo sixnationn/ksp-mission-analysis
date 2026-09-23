@@ -270,3 +270,13 @@ The `milestones/m5-mint-view-proton.json` checkpoint was captured at 11:21:02 UT
 | gpt-6-sol | max | 9,438,280 | 9,349,376 | 88,904 | 25,992 | 14,955 |
 
 Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Tester build update handoff checkpoint
+
+The `milestones/m5-updates.json` checkpoint was captured at 13:50:05 UTC on 23 September 2026, against `milestones/m5-updates-start.json` from 13:41:12. This interval includes the update-control contract, GitHub API check, GTK implementation, documentation and local tests. CI after this checkpoint is outside the interval.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | max | 3,525,297 | 3,484,928 | 40,369 | 18,028 | 10,483 |
+
+Other registered model and effort combinations recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.

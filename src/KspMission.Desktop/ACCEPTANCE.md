@@ -21,3 +21,9 @@
 13. At 3440×1440 and after a window resize, equal world-space radii occupy equal screen pixels in an overhead view. A circular orbit must not widen or narrow merely because the GtkGLArea aspect ratio changed. Marker picking uses the same projection.
 14. Dragging upward reaches overhead and stops there; continued upward drag must not move the camera under the orbital plane. Dragging downward moves toward edge-on. The visible Top view control gives an immediate overhead view.
 15. The synthetic study shows at least one non-target body and several visibly inclined orbits. Its role fields describe mission stops, while the body table, preview and Newtonian force model include every body in the source snapshot. No synthetic result implies KSP or Principia validation.
+
+## Tester build update handoff
+
+16. A staged tester bundle shows its `source-commit.txt` identity in the window. If that file is absent or malformed, the window says the build identity is unknown instead of presenting a fabricated revision.
+17. Pressing Check updates queries the latest successful `main` Build and check run without blocking the GTK window. If its source commit matches the bundle, the window says it is current. If it differs, the app opens that run's page so the tester can download a fresh artifact. It never overwrites a running executable, the worker, snapshots, or KSP files.
+18. An unavailable network service, missing URI handler, malformed API reply, or unexpected run URL leaves the app usable and provides the stable workflow page or a readable error. An API response cannot redirect the app to another site.

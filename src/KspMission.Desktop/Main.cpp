@@ -6,7 +6,11 @@
 #include "ShootingWorkflow.hpp"
 #include "ReportReopen.hpp"
 #include "ViewMath.hpp"
+#include "UpdateCheck.hpp"
 #include <epoxy/gl.h>
+#include <giomm/appinfo.h>
+#include <giomm/cancellable.h>
+#include <giomm/file.h>
 #include <glibmm/ustring.h>
 #include <sigc++/sigc++.h>
 #include <gdkmm/texture.h>
@@ -88,6 +92,12 @@ std::string read_bytes(const std::string& path){
     std::ostringstream bytes;bytes<<in.rdbuf();
     if(in.bad())throw std::runtime_error("Cannot read complete snapshot: "+path);
     return bytes.str();
+}
+std::string read_bundle_commit(const std::filesystem::path& executable){
+    std::ifstream in(std::filesystem::absolute(executable).parent_path()/"source-commit.txt");
+    std::string commit;
+    if(std::getline(in,commit)&&update::valid_commit(commit))return commit;
+    return {};
 }
 struct PreparedRuntime {RuntimeLoad load;Ephemeris preview;};
 PreparedRuntime prepare_runtime(const std::string& path,const std::string& expected_hash){
@@ -230,20 +240,26 @@ private:
 class DesktopWindow final:public Gtk::ApplicationWindow {
 public:
     DesktopWindow(Snapshot snapshot,Ephemeris ephemeris,std::string import_path,std::string expected_hash,
-                  std::string worker_path,std::string command_error):snapshot_(std::move(snapshot)),ephemeris_(std::move(ephemeris)),
+                  std::string worker_path,std::string build_commit,std::string command_error):snapshot_(std::move(snapshot)),ephemeris_(std::move(ephemeris)),
         view_(snapshot_,ephemeris_,[this](std::size_t index){select(index);},[this](const std::string& error){status_.set_text(error);}),
         root_(Gtk::Orientation::VERTICAL,0),main_(Gtk::Orientation::HORIZONTAL,0),left_(Gtk::Orientation::VERTICAL,10),
         right_(Gtk::Orientation::VERTICAL,10),center_(Gtk::Orientation::VERTICAL,0),bottom_(Gtk::Orientation::VERTICAL,8),
         selection_("Selected: Haven"),status_("Synthetic visualization ready · camera changes do not affect the trajectory"),
         import_("Import runtime JSON"),search_("Screen runtime mission"),evaluate_("Evaluate fixed trial"),
         shoot_("Shoot nearby trial"),open_("Open saved report"),
-        cancel_("Cancel worker"),export_("Save report"),
-        worker_path_(std::move(worker_path)){
+        cancel_("Cancel worker"),export_("Save report"),updates_("Check updates"),
+        worker_path_(std::move(worker_path)),build_commit_(std::move(build_commit)){
         set_title("KSP Mission Analysis · Synthetic study");set_default_size(1440,880);
         install_css();set_child(root_);
         auto* top=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL,4);top->add_css_class("topbar");
         eyebrow_.set_xalign(0);eyebrow_.add_css_class("eyebrow");top->append(eyebrow_);
-        top->append(*label("A dated orbital workspace","title"));
+        auto* title_row=Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL,12);
+        auto* title=label("A dated orbital workspace","title");title->set_hexpand(true);title_row->append(*title);
+        update_status_.set_text(build_commit_.empty()?"Build identity unknown":"Build "+build_commit_.substr(0,7));
+        update_status_.add_css_class("small");title_row->append(update_status_);
+        updates_.add_css_class("body-button");
+        updates_.signal_clicked().connect(sigc::mem_fun(*this,&DesktopWindow::check_updates));
+        title_row->append(updates_);top->append(*title_row);
         top_meta_.set_xalign(0);top_meta_.add_css_class("meta");top->append(top_meta_);
         root_.append(*top);
         main_.set_vexpand(true);root_.append(main_);
@@ -260,21 +276,82 @@ private:
     Gtk::Box root_,main_,left_,right_,center_,bottom_;
     Gtk::Box body_rows_{Gtk::Orientation::VERTICAL,7},fields_{Gtk::Orientation::VERTICAL,1};
     Gtk::Box form_{Gtk::Orientation::VERTICAL,5},route_rows_{Gtk::Orientation::VERTICAL,4};
-    Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_,worker_status_;
-    Gtk::Entry path_,hash_;Gtk::Button import_,search_,evaluate_,shoot_,open_,cancel_,export_;
+    Gtk::Label selection_,status_,eyebrow_,top_meta_,source_info_,frame_info_,model_info_,scene_time_,import_status_,worker_status_,update_status_;
+    Gtk::Entry path_,hash_;Gtk::Button import_,search_,evaluate_,shoot_,open_,cancel_,export_,updates_;
     Gtk::ProgressBar progress_;
     std::map<std::string,Gtk::Entry*> inputs_;
     WorkerClient worker_;
-    sigc::connection poll_connection_;
+    sigc::connection poll_connection_,update_timeout_;
     std::optional<RuntimeLoad> runtime_source_;
     std::optional<json> submitted_request_,terminal_event_;
     std::vector<json> evaluation_events_;
-    std::string worker_path_,loaded_path_,loaded_hash_,request_id_;
+    std::string worker_path_,build_commit_,loaded_path_,loaded_hash_,request_id_;
+    Glib::RefPtr<Gio::File> update_file_;
+    Glib::RefPtr<Gio::Cancellable> update_cancel_;
     std::string shooting_stages_;
     std::size_t request_sequence_=0;
     bool pending_close_=false,terminal_seen_=false,active_evaluation_=false,active_shooting_=false;
     std::string source_details_="Synthetic M2 fixture · five bodies with 0°, 9°, 18° and 27° orbit tilts · no KSP or Principia runtime import";
     bool runtime_loaded_=false;
+    static constexpr const char* update_api_url=
+        "https://api.github.com/repos/sixnationn/ksp-mission-analysis/actions/workflows/build.yml/runs?branch=main&status=success&per_page=1";
+    static constexpr const char* builds_url=
+        "https://github.com/sixnationn/ksp-mission-analysis/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess";
+    void open_build_page(const std::string& url){
+        try{
+            if(!Gio::AppInfo::launch_default_for_uri(url))
+                throw std::runtime_error("No browser is configured");
+        }catch(const std::exception& error){
+            update_status_.set_text("Open the build page from TESTING.md");
+            status_.set_text("Could not open browser: "+std::string(error.what())+" · "+url);
+        }
+    }
+    void check_updates(){
+        updates_.set_sensitive(false);update_status_.set_text("Checking builds…");
+        try{
+            update_file_=Gio::File::create_for_uri(update_api_url);
+            update_cancel_=Gio::Cancellable::create();
+            update_timeout_=Glib::signal_timeout().connect([this]{
+                if(update_cancel_)update_cancel_->cancel();
+                updates_.set_sensitive(true);
+                update_status_.set_text("Check timed out; opening builds");
+                open_build_page(builds_url);
+                return false;
+            },8000);
+            update_file_->load_contents_async(sigc::mem_fun(*this,&DesktopWindow::update_loaded),update_cancel_);
+        }catch(const std::exception& error){
+            update_timeout_.disconnect();
+            updates_.set_sensitive(true);
+            update_status_.set_text("Check unavailable; opening builds");
+            status_.set_text("Update check failed: "+std::string(error.what()));
+            open_build_page(builds_url);
+        }
+    }
+    void update_loaded(const Glib::RefPtr<Gio::AsyncResult>& result){
+        char* contents=nullptr;gsize length=0;
+        update_timeout_.disconnect();
+        if(update_cancel_&&update_cancel_->is_cancelled())return;
+        updates_.set_sensitive(true);
+        try{
+            if(!update_file_->load_contents_finish(result,contents,length))
+                throw std::runtime_error("Could not read the build response");
+            if(!contents)throw std::runtime_error("Empty build response");
+            const std::string body(contents,length);g_free(contents);contents=nullptr;
+            const auto latest=update::inspect_latest(build_commit_,body);
+            if(latest.kind==update::Kind::Current){
+                update_status_.set_text("Current build "+latest.commit.substr(0,7));
+                return;
+            }
+            update_status_.set_text("Latest build "+latest.commit.substr(0,7));
+            open_build_page(latest.url);
+        }catch(const std::exception& error){
+            if(contents)g_free(contents);
+            if(update_cancel_&&update_cancel_->is_cancelled())return;
+            update_status_.set_text("Check unavailable; opening builds");
+            status_.set_text("Update check failed: "+std::string(error.what()));
+            open_build_page(builds_url);
+        }
+    }
     void show_import_error(const std::string& detail){
         const std::string message="Import rejected: "+detail+". Retained previous "+(runtime_loaded_?std::string("runtime"):std::string("synthetic"))+" scene.";
         import_status_.set_text(message);status_.set_text(message);
@@ -878,6 +955,8 @@ window {background:#111820;color:#d8e3ed;font-family:Sans;}
         return true;
     }
     bool close_request(){
+        update_timeout_.disconnect();
+        if(update_cancel_)update_cancel_->cancel();
         if(worker_.running()){pending_close_=true;worker_.cancel();
             worker_status_.set_text("Closing after worker cancellation and reap");return true;}
         poll_connection_.disconnect();return false;
@@ -930,7 +1009,8 @@ int main(int argc,char** argv){
     auto app=Gtk::Application::create("org.kspmission.desktop");
     try{
         auto snapshot=synthetic_snapshot();auto ephemeris=synthetic_ephemeris(snapshot);
-        return app->make_window_and_run<DesktopWindow>(1,argv,std::move(snapshot),std::move(ephemeris),path,hash,worker_path,command_error);
+        return app->make_window_and_run<DesktopWindow>(1,argv,std::move(snapshot),std::move(ephemeris),path,hash,
+            worker_path,read_bundle_commit(argv[0]),command_error);
     }catch(const std::exception& error){
         g_printerr("KSP Mission synthetic desktop failed: %s\n",error.what());
         return app->make_window_and_run<ErrorWindow>(argc,argv,std::string(error.what()));

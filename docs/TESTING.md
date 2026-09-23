@@ -19,6 +19,21 @@ paths appear and that selection, orbit, pan and zoom work. Mission search
 needs a real runtime snapshot. Keep `ksp_desktop` and `ksp_worker` together.
 If the app does not start, see [Ubuntu runtime libraries](#ubuntu-runtime-libraries).
 
+### Get a newer tester build
+
+The window shows the commit from its bundled `source-commit.txt`. Press
+**Check updates**. If this is the latest successful `main` build, the window
+says so. Otherwise it opens that build's GitHub Actions page. Download its
+`ksp-desktop-ubuntu-tester` artifact, close the old app, and unzip the new
+bundle into a new folder. Keep the new `ksp_desktop` and `ksp_worker` together.
+Windows testers choose `ksp-desktop-windows-tester` on the same page.
+
+An already downloaded ZIP or folder never changes when `main` changes. This
+button checks and opens a download page; it does not replace running files or
+touch KSP. If the check cannot reach GitHub, it opens the
+[successful main builds](https://github.com/sixnationn/ksp-mission-analysis/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess)
+page instead. An older bundle without the button needs a fresh download once.
+
 ## Ubuntu: import a Principia flight
 
 The desktop imports a **snapshot JSON file made during a loaded KSP flight**.
