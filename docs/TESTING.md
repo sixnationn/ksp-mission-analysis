@@ -1,54 +1,105 @@
 # Test the current desktop build
 
-This is an external KSP mission-analysis application. It is not a mod you
-install into `GameData`. Ubuntu 24.04 is the primary test target; Windows
-2022 or a comparable Windows system can use the MSYS2 UCRT64 build. You can
-inspect the synthetic 3D scene without owning KSP. The supplied CI archives
-are dynamic **development test bundles**, not standalone installers.
+This is an external KSP mission-analysis app. It is **not** a mod to put in
+`GameData`. Ubuntu 24.04 is the primary test target. These are development
+test bundles, not standalone installers.
 
-## Get a matching build
+## Ubuntu: open the app
 
-On the public repository's [Actions → Build and check](https://github.com/sixnationn/ksp-mission-analysis/actions/workflows/build.yml) page, choose a
-successful run for `main` and download either `ksp-desktop-ubuntu-tester` or
-`ksp-desktop-windows-tester` from its artifacts. Extract the ZIP. Keep
-`ksp_desktop` and `ksp_worker` (or both `.exe` files) in the same directory;
-the desktop looks for its worker there by default. `source-commit.txt` names
-the exact source revision, and `runtime-dependencies.txt` records the CI
-machine's dynamic library scan. Artifacts are retained for seven days.
+1. On [Actions → Build and check](https://github.com/sixnationn/ksp-mission-analysis/actions/workflows/build.yml), open a successful `main` run and download its **`ksp-desktop-ubuntu-tester`** artifact. Unzip it.
+2. Open a terminal **inside the unzipped folder** and run:
 
-The Ubuntu bundle needs GTK 4/gtkmm, libepoxy, OpenGL and the C++ runtime on
-the test machine. The approved Ubuntu package list and build commands are in
-[dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/DEPENDENCIES.md) and the CI workflow. The Windows bundle must
-run with the MSYS2 **UCRT64** runtime packages listed in that workflow; open
-the UCRT64 shell, install those listed packages if absent, and navigate to the
-extracted directory. The dependency record is evidence from the build runner,
-not proof that another computer already has every library. If a binary fails
-to launch, include its error and the dependency record in the report.
+   ```bash
+   chmod +x ksp_desktop ksp_worker
+   ./ksp_desktop
+   ```
 
-## First visual test, no game required
+This opens a clearly labeled **synthetic** 3D scene. Check that bodies and
+paths appear and that selection, orbit, pan and zoom work. Mission search
+needs a real runtime snapshot. Keep `ksp_desktop` and `ksp_worker` together.
+If the app does not start, see [Ubuntu runtime libraries](#ubuntu-runtime-libraries).
 
-GitHub artifact ZIP extraction may clear Unix executable permissions. On
-Ubuntu, run `chmod +x ksp_desktop ksp_worker` once after extraction. From the
-extracted directory, run the platform's executable in a terminal:
+## Ubuntu: import a Principia flight
 
-```text
-./ksp_desktop
-./ksp_desktop.exe   # Windows UCRT64 shell
+The desktop imports a **snapshot JSON file made during a loaded KSP flight**.
+It cannot import a KSP save, a `GameData` folder or the provisional JNSQ
+config catalog directly.
+If you already have a `snapshot-...json` from this exporter, skip to step 3.
+
+1. Use a **disposable copy** of your modded KSP 1.12.5 installation. The
+   desktop ZIP does **not** contain the in-game exporter. Put a compiled
+   `KspMission.RuntimeExporter.dll` in that copy at
+   `GameData/KspMission/Plugins/`. If you do not have the DLL, see
+   [building the exporter](#build-the-in-game-exporter-if-needed).
+2. Start a flight with Principia loaded and press **Ctrl+Alt+F8**. If capture
+   succeeds, KSP writes `snapshot-...json` in
+   `<your KSP folder>/PluginData/KspMission/`. This is the file to import.
+3. Close the synthetic desktop window. Back in the terminal **inside the
+   unzipped desktop folder**, run the following. Change only the first line
+   to the full path of your actual JSON file:
+
+   ```bash
+   snapshot="/absolute/path/to/KSP/PluginData/KspMission/snapshot-...json"
+   hash="$(sha256sum "$snapshot" | cut -d ' ' -f1)"
+   ./ksp_desktop --snapshot "$snapshot" --sha256 "$hash"
+   ```
+
+The window should say **“Runtime JSON accepted”** and show the imported
+source and bodies. The hash is calculated from the exact file, so do not edit
+the JSON between the second and third commands. If the app says **“Import
+rejected”**, run this in the same terminal to see the reason without opening
+a window:
+
+```bash
+./ksp_desktop --validate-snapshot --snapshot "$snapshot" --sha256 "$hash"
 ```
 
-This opens a **synthetic fixture** for checking the 3D scene and controls. At
-normal display size, check that the source is labeled synthetic, orbit paths
-and bodies are visible, selecting a body works, and orbit/pan/zoom responds.
-The synthetic scene cannot establish a real JNSQ transfer, and mission search
-should remain unavailable until an acceptable runtime source is imported.
-If you see a blank or clipped window, capture a full-resolution screenshot
-with the display size and scaling setting.
+If no JSON appears after the hotkey, keep the KSP log and mod version list.
+The exporter has compiled but has **not yet been proven in a loaded game**;
+a capture failure is useful test evidence. An accepted JSON is still labeled
+`runtime_observed_uncompared`: the independent Newtonian preview has not
+been checked against the installed Principia trajectory.
 
-## Run the source checks
+## Build the in-game exporter if needed
 
-To run the full source checks, clone the repository at the commit in the
-bundle. On Ubuntu, install the already documented build packages; on Windows,
-run these commands in an MSYS2 UCRT64 shell with the workflow's packages:
+The exporter is a separate DLL, not part of the Ubuntu desktop artifact. Its
+build has so far been checked on Windows, using .NET 10, the .NET Framework
+reference assemblies and managed DLLs from a KSP 1.12.5 copy. On Windows, from the
+repository root, point `KspManagedDir` at that copy's
+`KSP_x64_Data/Managed` folder (the one containing `Assembly-CSharp.dll`):
+
+```powershell
+dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj -c Release "-p:KspManagedDir=C:\path\to\KSP\KSP_x64_Data\Managed"
+```
+
+Copy `src/KspMission.RuntimeExporter/bin/Release/net472/KspMission.RuntimeExporter.dll`
+to the disposable game copy's `GameData/KspMission/Plugins/` folder. Building
+the exporter on Ubuntu has not yet been checked; an
+Ubuntu tester who cannot get a compiled DLL can still test the synthetic
+desktop scene and report this setup gap. The [game runtime dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/GAME-RUNTIME-DEPENDENCIES.md)
+list the required JNSQ, Reborn Real, Principia and support-mod versions.
+
+## Ubuntu runtime libraries
+
+The Ubuntu desktop bundle needs GTK 4/gtkmm, libepoxy, OpenGL and the C++
+runtime on the test computer. The approved Ubuntu package list is in
+[dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/DEPENDENCIES.md).
+The artifact's `runtime-dependencies.txt` records libraries on the CI runner;
+it does not install them on your computer. If launch fails, send the terminal
+error and that file.
+
+## Windows and source checks
+
+For Windows, download **`ksp-desktop-windows-tester`** from the same successful
+run. Use an MSYS2 **UCRT64** shell with the packages listed in the
+[CI workflow](https://github.com/sixnationn/ksp-mission-analysis/blob/main/.github/workflows/build.yml).
+Keep `ksp_desktop.exe` and `ksp_worker.exe` together; run
+`./ksp_desktop.exe`. For a captured JSON, use the same `--snapshot` and
+`--sha256` options with `ksp_desktop.exe`. Both artifacts are retained for
+seven days. `source-commit.txt` names the source revision in each bundle.
+
+To run the source checks, clone that revision. On Ubuntu install the documented
+build packages; on Windows use the MSYS2 UCRT64 shell and workflow packages:
 
 ```text
 cmake -S . -B build/tester -DCMAKE_BUILD_TYPE=Release
@@ -56,54 +107,15 @@ cmake --build build/tester --config Release
 ctest --test-dir build/tester -C Release --output-on-failure
 ```
 
-The .NET importer checks use the separate .NET 10 SDK. All source tests use
-synthetic or runtime-shaped data and do not validate a loaded KSP installation.
-
-## Optional exact runtime snapshot
-
-If you own KSP 1.12.5 and want to test the real import path, use a separate
-disposable copy of the game. The required JNSQ, Reborn Real, Principia and
-support-mod versions, plus known load gaps, are recorded in
-[game runtime dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/GAME-RUNTIME-DEPENDENCIES.md). The KSP exporter
-has compiled but **has not yet been proven in a loaded game**; a failed
-capture is useful test evidence. The exporter build has been checked on
-Windows only. Build it there with .NET 10, the .NET Framework reference
-assemblies, and a directory of assemblies from your own game copy containing
-`Assembly-CSharp.dll`:
-
-```text
-dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj -c Release -p:KspManagedDir=/path/to/KSP/Managed
-```
-
-Put the resulting `KspMission.RuntimeExporter.dll` under
-`GameData/KspMission/Plugins/` in that disposable copy. In a loaded flight,
-`Ctrl+Alt+F8` requests a JSON capture under the game's
-`PluginData/KspMission/` directory. Keep the game log and mod version list
-if it refuses or crashes. Do not place the exporter into your existing KSP
-installation for this test.
-
-For an exporter-created snapshot, calculate its SHA-256 and validate the
-exact bytes before opening them. In an Ubuntu or MSYS2 UCRT64 shell:
-
-```text
-sha256sum /path/to/snapshot.json
-./ksp_desktop --validate-snapshot --snapshot /path/to/snapshot.json --sha256 HEX_FROM_ABOVE
-./ksp_desktop --snapshot /path/to/snapshot.json --sha256 HEX_FROM_ABOVE
-```
-
-Use `ksp_desktop.exe` for the Windows commands. A failed validation should
-print `REJECTED` and exit nonzero; a successful validation prints `ACCEPTED`
-with the source hash, confidence, body count, coverage and no-leap display
-date. Use the hash of the exact file you pass, without editing it afterward.
-An accepted JSON schema and an independent Newtonian preview still do not
-prove Principia agreement. The raw JNSQ Reborn Real config importer only
-produces a provisional catalog and cannot replace a loaded flight snapshot.
+The .NET importer checks use the separate .NET 10 SDK. Source tests use
+synthetic or runtime-shaped data; they do not validate a loaded KSP game.
 
 ## What to send back
 
-Include the operating system, display resolution/scaling, source commit,
-launch command, whether the test was synthetic or used an actual runtime
-snapshot, and any terminal error. For a visual issue, send one full-resolution
-screenshot of the whole window. For an imported source, report whether search,
-cancel, report save and read-only reopen behaved as expected. Do not send a
-KSP save or proprietary game archive unless you explicitly choose to share it.
+Include your OS, display resolution/scaling, `source-commit.txt`, launch
+command, and whether you used the synthetic scene or a captured JSON. If
+capture or import fails, send the exact error, KSP and Principia versions,
+mod list and relevant game log. For a visual issue, send one full-window
+screenshot. For an imported source, report whether search, cancel, report
+save and read-only reopen worked. Do not send a KSP save or game archive
+unless you choose to share it.
