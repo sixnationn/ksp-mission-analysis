@@ -27,3 +27,7 @@
 16. A staged tester bundle shows its `source-commit.txt` identity in the window. If that file is absent or malformed, the window says the build identity is unknown instead of presenting a fabricated revision.
 17. Pressing Check updates queries the latest successful `main` Build and check run without blocking the GTK window. If its source commit matches the bundle, the window says it is current. If it differs, the app opens that run's page so the tester can download a fresh artifact. It never overwrites a running executable, the worker, snapshots, or KSP files.
 18. An unavailable network service, missing URI handler, malformed API reply, or unexpected run URL leaves the app usable and provides the stable workflow page or a readable error. An API response cannot redirect the app to another site.
+
+## Linux Mint zoom regression
+
+19. At maximum permitted zoom, a path sample that remains inside the scene rectangle must remain within OpenGL's depth interval. Zooming changes apparent screen size, not the depth ordering or clipping of otherwise visible orbit segments. Paths outside the viewport may still be cropped normally.

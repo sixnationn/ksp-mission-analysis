@@ -12,17 +12,19 @@ struct Projected {double x,y,z;};
 // Orthographic scale is measured in the shorter viewport dimension, so a
 // world-space circle cannot become an oval when the GTK window is resized.
 inline Projected project(Vec3 position_m,double scale_m,const Camera& camera,int width,int height){
-    const double x=position_m.x/scale_m/camera.zoom;
-    const double y=position_m.y/scale_m/camera.zoom;
-    const double z=position_m.z/scale_m/camera.zoom;
+    const double x=position_m.x/scale_m;
+    const double y=position_m.y/scale_m;
+    const double z=position_m.z/scale_m;
     const double cy=std::cos(camera.yaw_rad),sy=std::sin(camera.yaw_rad);
     const double cp=std::cos(camera.tilt_rad),sp=std::sin(camera.tilt_rad);
     const double rotated_x=cy*x-sy*y;
     const double rotated_y=sy*x+cy*y;
     const double screen_y=cp*rotated_y-sp*z;
     const double aspect=static_cast<double>(std::max(1,width))/std::max(1,height);
-    return {rotated_x/std::max(1.0,aspect)+camera.pan_x,
-            screen_y*std::min(1.0,aspect)+camera.pan_y,
+    // Screen zoom must not push otherwise visible orbit arcs past OpenGL's
+    // normalized depth limits. Scene scale already bounds their depth.
+    return {rotated_x/camera.zoom/std::max(1.0,aspect)+camera.pan_x,
+            screen_y/camera.zoom*std::min(1.0,aspect)+camera.pan_y,
             sp*rotated_y+cp*z};
 }
 

@@ -35,3 +35,21 @@ folder, keeps the exporter and JSON out of the Wine prefix, and uses the
 captured JSON with the native Linux desktop. The exporter still requires the
 specific JNSQ and JNSQ Reborn files and has not produced a validated loaded
 Principia capture.
+
+## Zoom follow-up from build 4872e45
+
+The tester's newer Linux Mint screenshot shows outer orbit arcs ending within
+the scene after zooming in. Source inspection found the depth coordinate was
+divided by the same zoom factor as screen X and Y. At the closest allowed zoom,
+an otherwise visible path sample could exceed OpenGL's [-1, 1] depth interval
+and disappear. The focused geometry test reproduced this before the change.
+Depth now uses the scene scale without zoom while screen X and Y still zoom;
+the focused test and desktop build pass locally. Paths beyond the scene edges
+remain normally cropped. The fixed GTK scene still needs a fresh Mint screenshot
+and hands-on zoom check.
+
+The same tester supplied feedback that the Ubuntu guide lacked exporter build
+steps. The guide now includes repository clone, .NET SDK check, Linux build and
+copy commands using the disposable Proton KSP copy's Managed directory. This
+Linux command follows the project build contract and Microsoft's SDK
+documentation; it has not yet been run on a Linux KSP installation.

@@ -20,6 +20,18 @@ void aspect_ratio(){
             "equal world radii must occupy equal screen pixels after resize");
     }
 }
+void zoom_does_not_clip_visible_orbit(){
+    view::Camera camera;camera.yaw_rad=0;camera.tilt_rad=0.55;
+    constexpr double radius=2e7,scene_scale=3e7;
+    const Vec3 along_depth{0,radius*std::sin(camera.tilt_rad),radius*std::cos(camera.tilt_rad)};
+    const auto normal=view::project(along_depth,scene_scale,camera,1400,600);
+    camera.zoom=0.35;
+    const auto close=view::project(along_depth,scene_scale,camera,1400,600);
+    check(std::abs(close.x)<1&&std::abs(close.y)<1,
+          "regression point remains inside the view when zoomed");
+    nearly(close.z,normal.z,1e-12,"zoom must not change depth or clip a visible orbit arc");
+    check(std::abs(close.z)<1,"visible orbit arc remains inside OpenGL depth range");
+}
 void overhead_drag(){
     const double initial=0.55;
     check(view::drag_tilt(initial,-100)<initial,"upward drag approaches overhead");
@@ -43,6 +55,7 @@ void inclined_fixture(){
 }
 }
 int main(){
-    try{aspect_ratio();overhead_drag();inclined_fixture();std::cout<<"PASS view geometry\n";return 0;}
+    try{aspect_ratio();zoom_does_not_clip_visible_orbit();overhead_drag();inclined_fixture();
+        std::cout<<"PASS view geometry\n";return 0;}
     catch(const std::exception& error){std::cerr<<"FAIL "<<error.what()<<'\n';return 1;}
 }

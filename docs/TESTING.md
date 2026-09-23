@@ -101,21 +101,57 @@ been checked against the installed Principia trajectory.
 
 ## Build the in-game exporter if needed
 
-The exporter is a separate DLL, not part of the Ubuntu desktop artifact. Its
-build has so far been checked on Windows, using .NET 10, the .NET Framework
-reference assemblies and managed DLLs from a KSP 1.12.5 copy. On Windows, from the
-repository root, point `KspManagedDir` at that copy's
-`KSP_x64_Data/Managed` folder (the one containing `Assembly-CSharp.dll`):
+The exporter is a separate DLL; it is not in the desktop ZIP. You need the
+approved **.NET 10 SDK** and the managed DLLs in your **disposable KSP 1.12.5
+copy**. The output is a `net472` DLL loaded by KSP through Proton, not a Linux
+program to launch with `dotnet`. If `dotnet --version` does not report 10.x,
+follow [Microsoft's Ubuntu SDK instructions](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-install)
+for your Mint/Ubuntu base before continuing.
+
+On **Linux Mint or Ubuntu**, first get the source if you only have the desktop
+ZIP:
+
+```bash
+git clone https://github.com/sixnationn/ksp-mission-analysis.git
+cd ksp-mission-analysis
+```
+
+From the repository root, run the next block. Change only its first line to
+the full path of the disposable KSP copy that
+your Proton shortcut launches. It must contain `KSP_x64.exe` and
+`KSP_x64_Data/Managed/Assembly-CSharp.dll`:
+
+```bash
+ksp="/absolute/path/to/your/disposable/KSP"
+dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj \
+  -c Release "-p:KspManagedDir=$ksp/KSP_x64_Data/Managed"
+mkdir -p "$ksp/GameData/KspMission/Plugins"
+cp src/KspMission.RuntimeExporter/bin/Release/net472/KspMission.RuntimeExporter.dll \
+  "$ksp/GameData/KspMission/Plugins/"
+```
+
+The first build may restore Microsoft's
+[.NET Framework reference assemblies](https://learn.microsoft.com/dotnet/framework/migration-guide/reference-assemblies)
+through the normal SDK restore. The DLLs under `KSP_x64_Data/Managed` are read
+from your own KSP copy and are not added to this repository.
+
+Start **that same copy** through Proton, load a flight and press Ctrl+Alt+F8.
+Look for `snapshot-...json` under its `PluginData/KspMission/`, then use the
+[import command above](#ubuntu-import-a-principia-flight). A successful
+`dotnet build` only proves compilation; a loaded-game export and Principia
+comparison still need tester evidence. The Linux exporter command has not
+yet been run on this Windows development host. If it fails, send the full
+terminal error and your `dotnet --version` output.
+
+On **Windows**, use the same repository source and managed DLLs, with a Windows
+path:
 
 ```powershell
-dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj -c Release "-p:KspManagedDir=C:\path\to\KSP\KSP_x64_Data\Managed"
+dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj -c Release "-p:KspManagedDir=C:\path\to\disposable\KSP\KSP_x64_Data\Managed"
 ```
 
 Copy `src/KspMission.RuntimeExporter/bin/Release/net472/KspMission.RuntimeExporter.dll`
-to the disposable game copy's `GameData/KspMission/Plugins/` folder. Building
-the exporter on Ubuntu has not yet been checked; an
-Ubuntu tester who cannot get a compiled DLL can still test the synthetic
-desktop scene and report this setup gap. The [game runtime dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/GAME-RUNTIME-DEPENDENCIES.md)
+to that copy's `GameData/KspMission/Plugins/`. The [game runtime dependencies](https://github.com/sixnationn/ksp-mission-analysis/blob/main/docs/GAME-RUNTIME-DEPENDENCIES.md)
 list the required JNSQ, Reborn Real, Principia and support-mod versions.
 
 ## Ubuntu runtime libraries
