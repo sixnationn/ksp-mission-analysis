@@ -249,3 +249,14 @@ The `milestones/m5-report-reopen.json` checkpoint was captured at 09:01:56 UTC o
 | gpt-6-sol | high | 1,946,876 | 1,923,968 | 22,908 | 2,486 | 1,223 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## M5 tester handoff checkpoint
+
+The `milestones/m5-tester-handoff.json` checkpoint was captured at 09:43:37 UTC on 23 September 2026, against `milestones/m5-tester-handoff-start.json` from 09:24:25. This interval includes public repository visibility, tester guide and artifact staging, local failure checks, a Windows CI packaging fix, Ubuntu/Windows CI and artifact inspection, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 9,016,219 | 8,904,320 | 111,899 | 26,473 | 11,663 |
+| gpt-6-sol | medium | 2,370,935 | 2,354,304 | 16,631 | 6,659 | 2,566 |
+
+Sol high, Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
