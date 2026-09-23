@@ -64,8 +64,10 @@ disposable copy of the game. The required JNSQ, Reborn Real, Principia and
 support-mod versions, plus known load gaps, are recorded in
 [game runtime dependencies](GAME-RUNTIME-DEPENDENCIES.md). The KSP exporter
 has compiled but **has not yet been proven in a loaded game**; a failed
-capture is useful test evidence. Build it with .NET 10 and a directory of
-assemblies from your own game copy containing `Assembly-CSharp.dll`:
+capture is useful test evidence. The exporter build has been checked on
+Windows only. Build it there with .NET 10, the .NET Framework reference
+assemblies, and a directory of assemblies from your own game copy containing
+`Assembly-CSharp.dll`:
 
 ```text
 dotnet build src/KspMission.RuntimeExporter/KspMission.RuntimeExporter.csproj -c Release -p:KspManagedDir=/path/to/KSP/Managed
