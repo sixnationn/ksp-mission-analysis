@@ -178,3 +178,15 @@ The `milestones/m2-worker-cache.json` checkpoint was captured at 03:30:18 UTC on
 | gpt-6-sol | high | 5,075,565 | 5,029,504 | 46,061 | 5,162 | 2,324 |
 
 Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
+
+## Reusable route-trial probe checkpoint
+
+The `milestones/m4-route-probe.json` checkpoint was captured at 04:32:52 UTC on 23 September 2026, against `milestones/m4-route-probe-start.json` from 04:17:33. This interval includes the prewritten probe contract, implementation, numerical review, local tests, Ubuntu and Windows CI, and coordination. It is a recording interval, not isolated benchmark time.
+
+| Actual model | Effort | Total input | Cached input | Fresh input | Output | Reasoning subset |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-sol | xhigh | 8,067,020 | 8,010,368 | 56,652 | 14,083 | 6,358 |
+| gpt-6-sol | medium | 3,977,466 | 3,948,928 | 28,538 | 10,539 | 3,204 |
+| gpt-6-sol | high | 2,080,507 | 2,033,280 | 47,227 | 6,292 | 3,550 |
+
+Astra and Luna recorded no new tokens. Total input includes cached input, and reasoning is a subset of output. These are recorded task-session counters, not billing or account-limit usage. The active coordinator response enters on the next refresh.
