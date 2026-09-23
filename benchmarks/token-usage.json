@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-23T00:08:21.3712202Z",
+  "generated_at_utc": "2026-09-23T00:12:49.6803249Z",
   "scope": "Registered task sessions only; active response is incomplete until next refresh.",
   "accounting": "Input includes cached input. Reasoning is a subset of output. Total is input plus output; do not add subsets again. Uncached input includes any cache-write input; cache writes are also reported separately.",
   "limitations": "Recorded runtime counters, not an invoice or weekly-limit estimate. Model attribution follows turn_context. No timing or quality claim follows from token counts alone.",
@@ -57,13 +57,13 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "xhigh",
       "sessions": 1,
-      "input_tokens": 178383657,
-      "cached_input_tokens": 176478976,
+      "input_tokens": 180028783,
+      "cached_input_tokens": 178107648,
       "cache_write_input_tokens": 0,
-      "output_tokens": 578578,
-      "reasoning_output_tokens": 252321,
-      "total_tokens": 178962235,
-      "uncached_input_tokens": 1904681
+      "output_tokens": 582405,
+      "reasoning_output_tokens": 253432,
+      "total_tokens": 180611188,
+      "uncached_input_tokens": 1921135
     }
   ],
   "sessions": [
@@ -118,14 +118,14 @@
       "model": "gpt-6-sol",
       "reasoning_effort": "xhigh",
       "source": "C:/Users/HeyTh/.codex/sessions/2026/09/22/rollout-2026-09-22T20-05-55-01a0ca82-a85f-7e91-b782-fe66f8ec4bcd.jsonl",
-      "as_of": "2026-09-23T00:08:12.297Z",
-      "input_tokens": 178383657,
-      "cached_input_tokens": 176478976,
+      "as_of": "2026-09-23T00:12:38.681Z",
+      "input_tokens": 180028783,
+      "cached_input_tokens": 178107648,
       "cache_write_input_tokens": 0,
-      "output_tokens": 578578,
-      "reasoning_output_tokens": 252321,
-      "total_tokens": 178962235,
-      "uncached_input_tokens": 1904681
+      "output_tokens": 582405,
+      "reasoning_output_tokens": 253432,
+      "total_tokens": 180611188,
+      "uncached_input_tokens": 1921135
     },
     {
       "role": "M1 importer builder",
